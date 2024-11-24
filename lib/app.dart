@@ -1,59 +1,80 @@
+// lib/app.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-// Import your pages
-import 'components/navbar.dart';
-import 'pages/signup.dart';
-import 'pages/login.dart';
 import 'pages/home.dart';
+import 'pages/login.dart';
+import 'pages/signup.dart';
+import 'pages/auth_callback_page.dart';
 
 class MyApp extends StatelessWidget {
+  MyApp({super.key});
+
+  // In your app.dart router configuration
+
+  final _router = GoRouter(
+    initialLocation: '/',
+    debugLogDiagnostics: true,
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => HomePage(),
+      ),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => LoginPage(),
+      ),
+      GoRoute(
+        path: '/signup',
+        builder: (context, state) => SignupPage(),
+      ),
+      // Updated callback routes
+      GoRoute(
+        path: '/sign-in/sso-callback',
+        builder: (context, state) {
+          print('Sign-in callback received');
+          return AuthCallbackPage(
+            onComplete: () => context.go('/dashboard'),
+          );
+        },
+      ),
+      GoRoute(
+        path: '/sign-up/sso-callback',
+        builder: (context, state) {
+          print('Sign-up callback received');
+          return AuthCallbackPage(
+            onComplete: () => context.go('/dashboard'),
+          );
+        },
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
-    // Configure routes
-    final router = GoRouter(
-      initialLocation: '/',
-      routes: [
-        GoRoute(
-          path: '/',
-          builder: (context, state) => Scaffold(
-            appBar: AppBar(
-              title: const Text('Smart Retail Books'),
-              centerTitle: true,
-            ),
-            body: HomePage(),
-          ),
-        ),
-        GoRoute(
-          path: '/login',
-          builder: (context, state) => LoginPage(),
-        ),
-        GoRoute(
-          path: '/signup',
-          builder: (context, state) => SignupPage(),
-        ),
-      ],
-      errorBuilder: (context, state) {
-        return Scaffold(
-          appBar: AppBar(title: const Text('Page Not Found')),
-          body: const Center(
-            child: Text(
-              '404 - Page Not Found',
-              style: TextStyle(fontSize: 24),
-            ),
-          ),
-        );
-      },
-    );
-
     return MaterialApp.router(
       title: 'Smart Retail Books',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         fontFamily: 'NotoSans',
       ),
-      routerDelegate: router.routerDelegate,
-      routeInformationParser: router.routeInformationParser,
+      routerConfig: _router,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+// Simple Dashboard Page (you can replace this with your actual dashboard)
+class DashboardPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Dashboard'),
+      ),
+      body: Center(
+        child: Text('Welcome to Dashboard'),
+      ),
     );
   }
 }

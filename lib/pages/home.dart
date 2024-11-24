@@ -8,10 +8,78 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Display the Navbar at the top
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(60.0), // Set height for the Navbar
-        child: Navbar(),
+        preferredSize: const Size.fromHeight(60.0),
+        child: Container(
+          color: const Color(0xFF181818),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // Logo Section
+              GestureDetector(
+                onTap: () {
+                  print('Logo clicked');
+                },
+                child: Row(
+                  children: [
+                    Image.network(
+                      "https://cdn-icons-png.flaticon.com/128/10433/10433049.png",
+                      height: 40,
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      "BookStore",
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Auth Section (Sign In and Sign Up Buttons)
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      context.go('/login'); // Navigate to Login
+                    },
+                    child: const Text(
+                      "Sign In",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      context.go('/signup'); // Navigate to Sign Up
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      "Sign Up",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
       body: Stack(
         children: [
@@ -55,7 +123,13 @@ class HomePage extends StatelessWidget {
                   // Discover Button
                   ElevatedButton(
                     onPressed: () {
-                      context.go('/login');
+                      print('Button pressed');
+                      try {
+                        context.go('/login');
+                        print('Navigation initiated');
+                      } catch (e) {
+                        print('Navigation error: $e');
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -86,18 +160,6 @@ class HomePage extends StatelessWidget {
                       mainAxisSpacing: 16,
                       crossAxisSpacing: 16,
                     ),
-                    // children: [
-                    //   FeatureCard(
-                    //     iconPath: 'assets/images/vast_library.png',
-                    //     title: "Vast Library",
-                    //     description: "Access thousands of books across all genres.",
-                    //   ),
-                    //   FeatureCard(
-                    //     iconPath: 'assets/images/smart_recommendations.png',
-                    //     title: "Smart Recommendations",
-                    //     description: "AI-powered suggestions based on your preferences.",
-                    //   ),
-                    // ],
                   ),
                   const SizedBox(height: 50),
                   // Hero Image
@@ -106,18 +168,19 @@ class HomePage extends StatelessWidget {
                       alignment: Alignment.center,
                       children: [
                         Container(
-                          width: 300,
-                          height: 300,
+                          width: 500,
+                          height: 500,
                           decoration: BoxDecoration(
-                            color: Colors.yellow[100]!.withOpacity(0.2),
+                            color: Colors.yellow[200]!.withOpacity(0.2),
                             shape: BoxShape.circle,
                           ),
                         ),
-                        // Image.asset(
-                        //   'assets/images/hero_image.png',
-                        //   width: 250,
-                        //   height: 250,
-                        // ),
+                        Image.asset(
+                          'assets/images/hero.png',
+                          width: 300, 
+                          height: 300,
+                          fit: BoxFit.cover,
+                        ),
                       ],
                     ),
                   ),
