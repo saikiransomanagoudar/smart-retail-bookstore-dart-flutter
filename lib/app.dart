@@ -19,9 +19,9 @@ class MyApp extends StatelessWidget {
           builder: (context, state) => Scaffold(
             appBar: AppBar(
               title: const Text('Smart Retail Books'),
+              centerTitle: true,
             ),
             body: HomePage(),
-            drawer: Navbar(),
           ),
         ),
         GoRoute(

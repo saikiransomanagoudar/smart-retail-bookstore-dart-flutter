@@ -1,9 +1,18 @@
 import 'package:flutter/material.dart';
+import '../components/navbar.dart';
+import 'package:go_router/go_router.dart';
+
+
 
 class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Display the Navbar at the top
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(60.0), // Set height for the Navbar
+        child: Navbar(),
+      ),
       body: Stack(
         children: [
           // Background Gradient
@@ -46,7 +55,7 @@ class HomePage extends StatelessWidget {
                   // Discover Button
                   ElevatedButton(
                     onPressed: () {
-                      Navigator.pushNamed(context, '/login');
+                      context.go('/login');
                     },
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -77,18 +86,18 @@ class HomePage extends StatelessWidget {
                       mainAxisSpacing: 16,
                       crossAxisSpacing: 16,
                     ),
-                    children: [
-                      FeatureCard(
-                        iconPath: 'assets/images/vast_library.png',
-                        title: "Vast Library",
-                        description: "Access thousands of books across all genres.",
-                      ),
-                      FeatureCard(
-                        iconPath: 'assets/images/smart_recommendations.png',
-                        title: "Smart Recommendations",
-                        description: "AI-powered suggestions based on your preferences.",
-                      ),
-                    ],
+                    // children: [
+                    //   FeatureCard(
+                    //     iconPath: 'assets/images/vast_library.png',
+                    //     title: "Vast Library",
+                    //     description: "Access thousands of books across all genres.",
+                    //   ),
+                    //   FeatureCard(
+                    //     iconPath: 'assets/images/smart_recommendations.png',
+                    //     title: "Smart Recommendations",
+                    //     description: "AI-powered suggestions based on your preferences.",
+                    //   ),
+                    // ],
                   ),
                   const SizedBox(height: 50),
                   // Hero Image
@@ -104,11 +113,11 @@ class HomePage extends StatelessWidget {
                             shape: BoxShape.circle,
                           ),
                         ),
-                        Image.asset(
-                          'assets/images/hero_image.png', // Replace with your hero image
-                          width: 250,
-                          height: 250,
-                        ),
+                        // Image.asset(
+                        //   'assets/images/hero_image.png',
+                        //   width: 250,
+                        //   height: 250,
+                        // ),
                       ],
                     ),
                   ),
