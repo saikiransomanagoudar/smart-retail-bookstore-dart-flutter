@@ -10,24 +10,18 @@ import uuid
 class Order(Base):
     __tablename__ = "orders"
 
-    order_id = Column(String, primary_key=True, index=True)  # Added to group items from same order
-    user_id = Column(String, ForeignKey('user_preferences.user_id'))
+    order_id = Column(String(50), primary_key=True)
+    user_id = Column(String(255), ForeignKey('users.user_id'))
     title = Column(String)
     price = Column(Float)
     total_quantity = Column(Integer, default=1)
-
-    # Address fields
     street = Column(String)
     city = Column(String)
     state = Column(String)
     zip_code = Column(String)
-
-    # Payment fields
-    card_number = Column(String)  # Store last 4 digits only
+    card_number = Column(String)
     expiry_date = Column(String)
-
-    # Dates
-    purchase_date = Column(DateTime, default=datetime.utcnow)
+    purchase_date = Column(DateTime)
     expected_shipping_date = Column(DateTime)
 
     @classmethod

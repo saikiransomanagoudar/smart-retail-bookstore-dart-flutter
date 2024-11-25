@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
+import '../auth_provider.dart';
 
 class LoginPage extends StatefulWidget {
   @override
@@ -14,7 +16,6 @@ class _LoginPageState extends State<LoginPage> {
   String? _errorMessage;
 
   Future<void> _handleEmailLogin() async {
-    // Clear previous error message
     setState(() {
       _errorMessage = null;
     });
@@ -37,17 +38,23 @@ class _LoginPageState extends State<LoginPage> {
         _passwordController.text,
       );
 
-      if (result['success']) {
+      if (result['success'] == true) {
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+        // Save user ID to AuthProvider
+        final userId = result['user']['user_id'];
+        authProvider.signIn(userId);
+
         // Navigate to dashboard
         context.go('/dashboard');
       } else {
         setState(() {
-          _errorMessage = result['message'] ?? 'Login Failed';
+          _errorMessage = result['message'] ?? 'Login failed. Please try again.';
         });
       }
     } catch (e) {
       setState(() {
-        _errorMessage = 'An error occurred during login';
+        _errorMessage = 'An error occurred during login. Please try again.';
       });
     } finally {
       setState(() {

@@ -6,6 +6,7 @@ import 'pages/home.dart';
 import 'pages/login.dart';
 import 'pages/signup.dart';
 import 'pages/auth_callback_page.dart';
+import 'pages/user_preferences.dart';
 
 class MyApp extends StatelessWidget {
   MyApp({super.key});
@@ -28,7 +29,10 @@ class MyApp extends StatelessWidget {
         path: '/signup',
         builder: (context, state) => SignupPage(),
       ),
-      // Updated callback routes
+      GoRoute(
+        path: '/user-preferences',
+        builder: (context, state) => UserPreferencesPage(),
+      ),
       GoRoute(
         path: '/sign-in/sso-callback',
         builder: (context, state) {

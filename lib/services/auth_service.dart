@@ -19,34 +19,31 @@ class AuthService {
         }),
       );
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final data = json.decode(response.body);
+      final data = json.decode(response.body);
 
-        if (data['success'] == true) {
-          return {
-            'success': true,
-            'message': data['message'],
-          };
-        } else {
-          return {
-            'success': false,
-            'message': data['message'],
-          };
-        }
+      if (response.statusCode == 200) {
+        // Handle successful registration
+        return {
+          'success': true,
+          'access_token': data['access_token'],
+          'user': data['user'],
+          'message': 'Registration successful',
+        };
       } else {
-        final error = json.decode(response.body);
+        // Handle failure
         return {
           'success': false,
-          'message': error['message'] ?? 'Registration failed',
+          'message': data['detail'] ?? 'Registration failed',
         };
       }
     } catch (e) {
       return {
         'success': false,
-        'message': 'An error occurred during registration',
+        'message': 'An error occurred during registration: $e',
       };
     }
   }
+
 
   // Sign In
   static Future<Map<String, dynamic>> signIn(String email, String password) async {
@@ -61,23 +58,57 @@ class AuthService {
       );
 
       final responseData = json.decode(response.body);
+
       if (response.statusCode == 200 && responseData['success'] == true) {
+        // Successful login
         return {
           'success': true,
-          'token': responseData['access_token'],
-          'message': 'Login successful',
+          'access_token': responseData['access_token'],
+          'user': responseData['user'],
+          'message': responseData['message'] ?? 'Login successful',
         };
       } else {
+        // Failed login
         return {
           'success': false,
-          'message': responseData['detail'] ?? 'Login failed',
+          'message': responseData['message'] ?? responseData['detail'] ?? 'Login failed',
         };
       }
     } catch (e) {
+      // Handle unexpected errors
       return {
         'success': false,
-        'message': 'An error occurred: $e',
+        'message': 'An error occurred during login: $e',
       };
+    }
+  }
+
+
+  // Save preferences
+  static Future<void> savePreferences(String userId, Map<String, dynamic> preferences) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/recommendations/preferences'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        ...preferences,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to save preferences');
+    }
+  }
+
+  static Future<void> initRecommendations(int userId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/recommendations/initial-recommendations'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to initialize recommendations');
     }
   }
 }

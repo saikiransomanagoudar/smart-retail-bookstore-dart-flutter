@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/auth_service.dart';
+import 'package:provider/provider.dart';
+import '../auth_provider.dart';
 
 class SignupPage extends StatefulWidget {
   @override
@@ -41,31 +43,44 @@ class _SignupPageState extends State<SignupPage> {
     });
 
     try {
+      // Call the signup service
       final result = await AuthService.signUp(
-        _emailController.text,
-        _passwordController.text,
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
       );
 
-      if (result['success'] == true) {
-        // Navigate to the dashboard or preferences page on success
-        context.go('/dashboard');
-      } else if (result['message'] == 'User already registered') {
-        // Navigate to the login page for already registered user
+      debugPrint('Backend response: $result');
+
+      // Extract user ID and check for success
+      if (result['access_token'] != null && result['user']?['user_id'] != null) {
+        final String userId = result['user']['user_id'];
+
+        // Save user ID in shared preferences or auth provider
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        authProvider.signIn(userId);
+
+        context.go('/user-preferences');
+      } else if (result['user']?['email'] == _emailController.text) {
+        // Handle user already registered scenario
         setState(() {
           _errorMessage = 'User already registered. Redirecting to login page...';
         });
-        await Future.delayed(Duration(seconds: 2)); // Show the message briefly
+        await Future.delayed(const Duration(seconds: 2));
         context.go('/login');
       } else {
+        // Handle unexpected backend structure
         setState(() {
           _errorMessage = result['message'] ?? 'An unexpected error occurred';
         });
       }
     } catch (e) {
+      // Catch exceptions during the API call
       setState(() {
-        _errorMessage = 'An error occurred during registration';
+        _errorMessage = 'An error occurred during registration. Please try again.';
       });
+      debugPrint('Signup exception: $e');
     } finally {
+      // Ensure loading state is updated
       setState(() {
         _isLoading = false;
       });
