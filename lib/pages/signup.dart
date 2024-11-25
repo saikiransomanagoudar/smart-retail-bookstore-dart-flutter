@@ -57,8 +57,7 @@ class _SignupPageState extends State<SignupPage> {
 
         // Save user ID in shared preferences or auth provider
         final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        authProvider.signIn(userId);
-
+        authProvider.signIn(result['access_token'], result['user']['user_id'], result['user']['email']);
         context.go('/user-preferences');
       } else if (result['user']?['email'] == _emailController.text) {
         // Handle user already registered scenario

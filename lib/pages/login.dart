@@ -40,12 +40,7 @@ class _LoginPageState extends State<LoginPage> {
 
       if (result['success'] == true) {
         final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-        // Save user ID to AuthProvider
-        final userId = result['user']['user_id'];
-        authProvider.signIn(userId);
-
-        // Navigate to dashboard
+        authProvider.signIn(result['access_token'], result['user']['user_id'], result['user']['email']);
         context.go('/dashboard');
       } else {
         setState(() {

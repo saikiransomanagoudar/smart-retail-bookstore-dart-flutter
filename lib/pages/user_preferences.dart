@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../auth_provider.dart';
+import 'package:go_router/go_router.dart';
 
 class UserPreferencesPage extends StatefulWidget {
   @override
@@ -98,47 +99,45 @@ class _UserPreferencesPageState extends State<UserPreferencesPage> {
   }
 
     Future<void> handleSubmit() async {
-        setState(() {
-            isSubmitting = true;
-        });
+      setState(() {
+        isSubmitting = true;
+      });
 
-        final authProvider = Provider.of<AuthProvider>(context, listen: false);
-        final userId = authProvider.userId;
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
 
-        try {
-            if (authProvider.userId == null) {
-            throw Exception("User ID is null. Ensure the user is signed in.");
-            }
-
-            print("Submitting preferences for user_id: ${authProvider.userId}");
-
-            final response = await http.post(
-            Uri.parse("http://localhost:8000/api/recommendations/preferences"),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: json.encode({
-                "user_id": authProvider.userId,
-                ...formData,
-            }),
-            );
-
-            if (response.statusCode == 200) {
-            Navigator.pushNamed(context, "/dashboard");
-            } else {
-            print("Error response: ${response.body}");
-            throw Exception("Error saving preferences");
-            }
-        } catch (error) {
-            print("Error saving preferences: $error");
-        } finally {
-            setState(() {
-            isSubmitting = false;
-            });
+      try {
+        if (authProvider.userId == null) {
+          throw Exception("User ID is null. Ensure the user is signed in.");
         }
+
+        print("Submitting preferences for user_id: ${authProvider.userId}");
+
+        final response = await http.post(
+          Uri.parse("http://localhost:8000/api/recommendations/preferences"),
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: json.encode({
+            "user_id": authProvider.userId,
+            ...formData,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          // Use GoRouter to navigate to the dashboard
+          context.go('/dashboard');
+        } else {
+          print("Error response: ${response.body}");
+          throw Exception("Error saving preferences");
+        }
+      } catch (error) {
+        print("Error saving preferences: $error");
+      } finally {
+        setState(() {
+          isSubmitting = false;
+        });
+      }
     }
-
-
 
   Widget buildSelectableButton(String value, bool selected, VoidCallback onTap) {
     return GestureDetector(

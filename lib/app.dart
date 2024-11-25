@@ -1,17 +1,18 @@
-// lib/app.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'auth_provider.dart';
 
 import 'pages/home.dart';
 import 'pages/login.dart';
 import 'pages/signup.dart';
 import 'pages/auth_callback_page.dart';
 import 'pages/user_preferences.dart';
+import 'components/navbar.dart';
+import 'pages/dashboard.dart';
 
 class MyApp extends StatelessWidget {
   MyApp({super.key});
-
-  // In your app.dart router configuration
 
   final _router = GoRouter(
     initialLocation: '/',
@@ -19,7 +20,10 @@ class MyApp extends StatelessWidget {
     routes: [
       GoRoute(
         path: '/',
-        builder: (context, state) => HomePage(),
+        builder: (context, state) {
+          final authProvider = Provider.of<AuthProvider>(context, listen: false);
+          return authProvider.isSignedIn ? DashboardPage() : HomePage();
+        },
       ),
       GoRoute(
         path: '/login',
@@ -32,6 +36,10 @@ class MyApp extends StatelessWidget {
       GoRoute(
         path: '/user-preferences',
         builder: (context, state) => UserPreferencesPage(),
+      ),
+      GoRoute(
+        path: '/dashboard',
+        builder: (context, state) => AppShell(child: DashboardPage()),
       ),
       GoRoute(
         path: '/sign-in/sso-callback',
@@ -56,14 +64,37 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'Smart Retail Books',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        fontFamily: 'NotoSans',
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+      ],
+      child: MaterialApp.router(
+        title: 'Smart Retail Books',
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          fontFamily: 'NotoSans',
+        ),
+        routerConfig: _router,
+        debugShowCheckedModeBanner: false,
       ),
-      routerConfig: _router,
-      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+// AppShell ensures Navbar is displayed on all pages
+class AppShell extends StatelessWidget {
+  final Widget child;
+
+  const AppShell({Key? key, required this.child}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(60),
+        child: Navbar(), // Navbar widget here
+      ),
+      body: child,
     );
   }
 }
@@ -73,11 +104,11 @@ class DashboardPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Dashboard'),
-      ),
       body: Center(
-        child: Text('Welcome to Dashboard'),
+        child: Text(
+          'Welcome to Dashboard',
+          style: TextStyle(fontSize: 24),
+        ),
       ),
     );
   }

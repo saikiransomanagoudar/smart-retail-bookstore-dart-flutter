@@ -5,9 +5,12 @@ import 'app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final authProvider = AuthProvider();
+  await authProvider.loadAuthState();
+
   runApp(
     ChangeNotifierProvider(
-      create: (context) => AuthProvider()..loadAuthState(),
+      create: (_) => authProvider,
       child: MyApp(),
     ),
   );
