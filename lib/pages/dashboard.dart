@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../auth_provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flip_card/flip_card.dart';
+import '../components/chatbot/chatbot.dart';
 
 class DashboardPage extends StatefulWidget {
   @override
@@ -34,24 +35,26 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> fetchPopularBooks() async {
     try {
-      setState(() {
-        loadingPopular = true;
-      });
-
-      final response = await http.get(
-          Uri.parse('http://localhost:8000/api/recommendations/trending-books'));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
         setState(() {
-          popularBooks = data;
-          loadingPopular = false;
+        loadingPopular = true;
         });
-      } else {
+
+        final response = await http.get(
+        Uri.parse('http://localhost:8000/api/recommendations/trending-books'),
+        );
+
+        if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('Popular Books Response: $data');
+        setState(() {
+            popularBooks = data;
+            loadingPopular = false;
+        });
+        } else {
         print("Error fetching popular books: ${response.statusCode}");
-      }
+        }
     } catch (e) {
-      print("Error fetching popular books: $e");
+        print("Error fetching popular books: $e");
     }
   }
 
@@ -331,12 +334,12 @@ Widget buildFlipCardFront(dynamic book) {
               book['author'] ?? 'Unknown Author',
               style: TextStyle(
                 color: Colors.grey[600],
-                fontSize: 10,
+                fontSize: 14,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-            SizedBox(height: 4),
+            SizedBox(height: 8),
             Row(
               children: [
                 Icon(Icons.star, color: Colors.amber, size: 14),
@@ -375,7 +378,9 @@ Widget buildFlipCardFront(dynamic book) {
         title: const Text("Dashboard"),
         backgroundColor: Colors.blueAccent,
       ),
-      body: SingleChildScrollView(
+      body: Stack(
+        children: [
+            SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Column(
@@ -455,6 +460,13 @@ Widget buildFlipCardFront(dynamic book) {
             ],
           ),
         ),
+      ),
+      Positioned(
+          right: 16,
+          bottom: 16,
+          child: Chatbot(),
+        ),
+        ],
       ),
     );
   }
