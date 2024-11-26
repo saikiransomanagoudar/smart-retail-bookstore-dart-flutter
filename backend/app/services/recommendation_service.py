@@ -6,16 +6,23 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from backend.app.models.user import get_user_preferences
 from backend.app.services.graphql_service import graphql_service
-from typing import List, Dict
+from typing import List, Dict, Optional
 import re
 from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain.llms import OpenAI
+import asyncio
+from datetime import datetime, timedelta
 
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env'))
 load_dotenv(dotenv_path)
 openai_api_key = os.getenv("OPENAI_API_KEY")
 llm = OpenAI(api_key=openai_api_key, temperature=0.7)
+
+# Cache storage with timestamps
+_trending_books_cache: Optional[List[Dict]] = None
+_cache_timestamp: Optional[datetime] = None
+CACHE_DURATION = timedelta(hours=1)
 
 def normalize_title(title: str) -> str:
     return re.split(r':|–|-', title)[-1].strip()
@@ -24,13 +31,18 @@ def generate_random_price() -> float:
     return round(random.uniform(9.99, 29.99), 2)
 
 def safe_float(value: any, default: float = 0.0) -> float:
-    """Safely convert a value to float with a default."""
     if value is None:
         return default
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+def is_cache_valid() -> bool:
+    """Check if the cache is still valid."""
+    if _trending_books_cache is None or _cache_timestamp is None:
+        return False
+    return datetime.now() - _cache_timestamp < CACHE_DURATION
 
 async def get_books(query: str = "", limit: int = 10) -> List[Dict]:
     """Get books using a basic query."""
@@ -57,7 +69,7 @@ async def get_books(query: str = "", limit: int = 10) -> List[Dict]:
         result = await graphql_service.execute_query(query, {"limit": limit})
         return result.get("books", [])
     except Exception as e:
-        print(f"Error fetching books: {str(e)}")
+        logging.error(f"Error fetching books: {str(e)}")
         return []
 
 def process_book(book: Dict, author: str = None) -> Dict:
@@ -150,16 +162,35 @@ def generate_llm_recommendations(preferences: dict) -> List[Dict]:
 
     raise HTTPException(
         status_code=500,
-        detail="Unable to generate valid recommendations after multiple attempts. Please try again."
+        detail="Unable to generate valid recommendations after multiple attempts"
     )
 
 async def get_trending_books() -> List[Dict]:
-    """Get trending books."""
+    """Get trending books with caching."""
+    global _trending_books_cache, _cache_timestamp
+
+    # Check cache first
+    if is_cache_valid():
+        logging.info("Returning cached trending books")
+        return _trending_books_cache
+
+    # If cache is invalid or empty, fetch new data
     try:
         books = await get_books(limit=10)
-        return [process_book(book) for book in books if book]
+        processed_books = [process_book(book) for book in books if book]
+        
+        # Update cache
+        _trending_books_cache = processed_books
+        _cache_timestamp = datetime.now()
+        
+        logging.info("Updated trending books cache")
+        return processed_books
     except Exception as e:
-        print(f"Error in get_trending_books: {str(e)}")
+        logging.error(f"Error fetching trending books: {str(e)}")
+        # If we have cached data, return it even if expired
+        if _trending_books_cache is not None:
+            logging.info("Returning expired cached data due to error")
+            return _trending_books_cache
         return []
 
 async def get_recommendations(user_id: str, db: Session) -> List[Dict]:
@@ -167,12 +198,12 @@ async def get_recommendations(user_id: str, db: Session) -> List[Dict]:
     try:
         user_preferences = await get_user_preferences(user_id, db)
         if not user_preferences:
-            print("No user preferences found, falling back to trending books")
+            logging.info("No user preferences found, falling back to trending books")
             return await get_trending_books()
 
         recommended_books = generate_llm_recommendations(user_preferences)
         if not recommended_books:
-            print("No LLM recommendations, falling back to trending books")
+            logging.info("No LLM recommendations, falling back to trending books")
             return await get_trending_books()
 
         processed_books = []
@@ -185,9 +216,9 @@ async def get_recommendations(user_id: str, db: Session) -> List[Dict]:
                     processed_book = process_book(book_details[0], book['author'])
                     processed_books.append(processed_book)
                 else:
-                    print(f"No match found for book: {book['title']}")
+                    logging.warning(f"No match found for book: {book['title']}")
             except Exception as e:
-                print(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
+                logging.error(f"Error processing book {book.get('title', 'Unknown')}: {str(e)}")
                 continue
 
         if not processed_books:
@@ -196,5 +227,5 @@ async def get_recommendations(user_id: str, db: Session) -> List[Dict]:
         return processed_books
 
     except Exception as e:
-        print(f"Error in get_recommendations: {str(e)}")
+        logging.error(f"Error in get_recommendations: {str(e)}")
         return await get_trending_books()
