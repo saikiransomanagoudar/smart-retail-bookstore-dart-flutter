@@ -165,19 +165,19 @@ Widget buildFlipCardFront(dynamic book) {
             ),
             // Price Tag
             Positioned(
-              top: 8, // Adjusted position for better visibility
-              right: 8, // Positioned to the top-right corner
+              top: 8,
+              right: 8,
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9), // Semi-transparent background
-                  borderRadius: BorderRadius.circular(4), // Rounded edges
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   '\$${(book['price'] ?? 0).toStringAsFixed(2)}',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 12, // Slightly larger font for better visibility
+                    fontSize: 12,
                   ),
                 ),
               ),
