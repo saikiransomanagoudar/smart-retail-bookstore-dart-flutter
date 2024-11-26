@@ -3,26 +3,37 @@ import os
 import random
 import json
 from fastapi import HTTPException
-from sqlalchemy.orm import Session  # Changed from requests.Session
+from sqlalchemy.orm import Session
 from backend.app.models.user import get_user_preferences
-from backend.app.services.graphql_service import graphql_service
+from backend.app.services.google_books_service import GoogleBooksAPIClient
 from typing import List, Dict
 import re
 from dotenv import load_dotenv
 from langchain.prompts import PromptTemplate
 from langchain.llms import OpenAI
+from urllib.parse import urlparse, parse_qs
 
 dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env'))
 load_dotenv(dotenv_path)
 openai_api_key = os.getenv("OPENAI_API_KEY")
+google_books_api_key = os.getenv("GOOGLE_BOOKS_API_KEY")
 llm = OpenAI(api_key=openai_api_key, temperature=0.7)
+google_books_api = GoogleBooksAPIClient(api_key=google_books_api_key)
 
 def normalize_title(title: str) -> str:
     return re.split(r':|–|-', title)[-1].strip()
 
 def generate_random_price():
-    return round(random.uniform(9.99, 29.99), 2)  # Changed range to match prompt
+    return round(random.uniform(9.99, 29.99), 2)
 
+async def get_book_description(book_id: str) -> str:
+    try:
+        book_details = google_books_api.get_book_details(book_id)
+        if book_details and "volumeInfo" in book_details:
+            return book_details["volumeInfo"].get("description", "No description available.")
+    except Exception as e:
+        logging.error(f"Error fetching book description for book_id={book_id}: {e}")
+    return "No description available."
 
 def generate_llm_recommendations(preferences: dict) -> List[Dict]:
     favorite_books = preferences.get("favorite_books", [])
@@ -103,78 +114,109 @@ def generate_llm_recommendations(preferences: dict) -> List[Dict]:
         detail="Unable to generate valid recommendations after multiple attempts. Please try again."
     )
 
+def clean_description(text: str) -> str:
+    if not text:
+        return "No description available."
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Replace special characters and unknown unicode
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    # Remove multiple spaces
+    text = ' '.join(text.split())
+    return text
+
+def process_image_url(url: str) -> str:
+    if not url:
+        return None
+    try:
+        # Extract book ID from the URL
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        book_id = query_params.get('id', [None])[0]
+        if book_id:
+            # Return a simpler URL format
+            return f'https://books.google.com/books/publisher/content/images/frontcover/{book_id}?fife=w400-h600'
+        return url
+    except Exception as e:
+        print(f"Error processing image URL: {e}")
+        return url
+
 async def get_recommendations(user_id: str, db: Session) -> List[Dict]:
-    user_preferences = await get_user_preferences(user_id, db)
+    try:
+        user_preferences = await get_user_preferences(user_id, db)
 
-    if not user_preferences:
-        raise HTTPException(
-            status_code=404,
-            detail="User preferences not found. Please complete preferences setup."
-        )
+        if not user_preferences:
+            raise HTTPException(
+                status_code=404,
+                detail="User preferences not found. Please complete preferences setup."
+            )
 
-    recommended_books = generate_llm_recommendations(user_preferences)
+        recommended_books = generate_llm_recommendations(user_preferences)
 
-    if not recommended_books:
-        raise HTTPException(
-            status_code=404,
-            detail="Could not generate recommendations. Please try again."
-        )
+        if not recommended_books:
+            raise HTTPException(
+                status_code=404,
+                detail="Could not generate recommendations. Please try again."
+            )
 
-    processed_books = []
-    for book in recommended_books:
-        normalized_title = normalize_title(book['title'])
-        book_details = await graphql_service.get_book_details_by_titles(normalized_title)
-        if book_details:
-            b = book_details[0]
-            processed_book = {
-                "title": b["title"],
-                "release_year": b.get("release_year"),
-                "image_url": b["images"][0]["url"] if b.get("images") else (
-                    b["image"]["url"] if b.get("image") else None),
-                "rating": b.get("rating"),
-                "pages": b.get("pages"),
-                "author": book["author"],
-                "price": generate_random_price(),
-                "description": b.get("description"),
-                "headline": b.get("headline")
+        processed_books = []
+        for book in recommended_books:
+            try:
+                normalized_title = normalize_title(book['title'])
+                search_results = google_books_api.search_books(f"{normalized_title} {book['author']}")
+                
+                if search_results and "items" in search_results:
+                    book_info = search_results["items"][0]
+                    book_id = book_info["id"]
+                    volume_info = book_info.get("volumeInfo", {})
+                    
+                    # Process the image URL
+                    image_url = volume_info.get("imageLinks", {}).get("thumbnail")
+                    processed_image_url = process_image_url(image_url) if image_url else None
+                    
+                    processed_book = {
+                        "id": book_id,
+                        "title": volume_info.get("title", book["title"]),
+                        "release_year": int(volume_info.get("publishedDate", "0")[:4]) if volume_info.get("publishedDate") else None,
+                        "release_date": volume_info.get("publishedDate"),
+                        "image_url": processed_image_url,
+                        "rating": volume_info.get("averageRating"),
+                        "pages": volume_info.get("pageCount"),
+                        "genres": volume_info.get("categories"),
+                        "description": clean_description(volume_info.get("description", "No description available.")),
+                        "price": generate_random_price(),
+                        "author": volume_info.get("authors", [book["author"]])[0]
+                    }
+                    processed_books.append(processed_book)
+                    print(f"Successfully processed book: {book['title']} with image URL: {processed_image_url}")
+            except Exception as e:
+                print(f"Error processing book {book['title']}: {str(e)}")
+                continue
+
+        return processed_books
+    except Exception as e:
+        print(f"Error in get_recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_trending_books() -> List[Dict]:
+    search_results = google_books_api.search_books("subject:fiction&orderBy=newest")
+    trending_books = []
+    if search_results and "items" in search_results:
+        for item in search_results["items"]:
+            book_details = item["volumeInfo"]
+            book_id = item["id"]
+            book_description = await get_book_description(book_id)
+            trending_book = {
+                "id": book_id,
+                "title": book_details.get("title"),
+                "release_year": int(book_details.get("publishedDate", "0")[:4]) if book_details.get("publishedDate") else None,
+                "release_date": book_details.get("publishedDate"),
+                "image_url": book_details.get("imageLinks", {}).get("thumbnail"),
+                "rating": book_details.get("averageRating"),
+                "pages": book_details.get("pageCount"),
+                "genres": book_details.get("categories"),
+                "description": book_description,
+                "price": generate_random_price()
             }
-            processed_books.append(processed_book)
-        else:
-            logging.warning(f"No match found for book: {book['title']}")
-
-    return processed_books
-
-
-async def get_trending_books() -> List[Dict]:  # Renamed for clarity
-    trending_ids = await graphql_service.get_trending_books_ids()
-
-    if not trending_ids:
-        raise HTTPException(
-            status_code=404,
-            detail="No trending books found"
-        )
-
-    trending_books = await graphql_service.get_book_details_by_ids(trending_ids)
-
-    if not trending_books:
-        raise HTTPException(
-            status_code=404,
-            detail="Could not fetch trending books details"
-        )
-
-    processed_books = []
-    for book in trending_books:
-        processed_book = {
-            "id": book["id"],
-            "title": book["title"],
-            "release_year": book.get("release_year"),
-            "release_date": book.get("release_date"),
-            "image_url": book["images"][0]["url"] if book.get("images") else (book["image"]["url"] if book.get("image") else None),
-            "rating": book.get("rating"),
-            "pages": book.get("pages"),
-            "description": book.get("description", "No description available."),
-            "price": generate_random_price()
-        }
-        processed_books.append(processed_book)
-
-    return processed_books
+            trending_books.append(trending_book)
+    return trending_books

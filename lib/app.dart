@@ -99,17 +99,17 @@ class AppShell extends StatelessWidget {
   }
 }
 
-// Simple Dashboard Page (you can replace this with your actual dashboard)
-class DashboardPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Text(
-          'Welcome to Dashboard',
-          style: TextStyle(fontSize: 24),
-        ),
-      ),
-    );
-  }
-}
+// // Simple Dashboard Page (you can replace this with your actual dashboard)
+// class DashboardPage extends StatelessWidget {
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       body: Center(
+//         child: Text(
+//           'Welcome to Dashboard',
+//           style: TextStyle(fontSize: 24),
+//         ),
+//       ),
+//     );
+//   }
+// }

@@ -22,7 +22,7 @@ class UserPreferencesInput(BaseModel):
         from_attributes = True
 
 class BookRecommendation(BaseModel):
-    id: int
+    id: str
     title: str
     release_year: Optional[int] = None
     release_date: Optional[str] = None
