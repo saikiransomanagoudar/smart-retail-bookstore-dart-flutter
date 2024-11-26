@@ -2,6 +2,7 @@
 # Created by `dart pub`
 .dart_tool/
 build/.env.local
+backend/.env
 # Flutter
 build/
 .dart_tool/
