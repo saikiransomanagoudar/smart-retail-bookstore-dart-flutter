@@ -4,6 +4,7 @@ from gql.transport.aiohttp import AIOHTTPTransport
 from backend.app.core.config import settings
 import asyncio
 
+
 class GraphQLService:
     def __init__(self, token: str):
         self.token = token
@@ -15,39 +16,39 @@ class GraphQLService:
             try:
                 transport = AIOHTTPTransport(
                     url=self.url,
-                    headers={"Authorization": self.token}
+                    headers={"Authorization": f"{self.token}"}
                 )
                 async with Client(
-                    transport=transport,
-                    fetch_schema_from_transport=False
+                        transport=transport,
+                        fetch_schema_from_transport=True
                 ) as session:
-                    print(f"Executing query: {query}")
-                    print(f"Variables: {variables}")
                     result = await session.execute(gql(query), variable_values=variables)
-                    print(f"Query result: {result}")
                     return result
             except Exception as e:
-                print(f"GraphQL query failed: {str(e)}")
+                print(f"An error occurred while executing GraphQL query: {str(e)}")
                 return {}
 
+    def extract_author_from_dto(self, book: Dict) -> None:
+        dto = book.get("dto")
+        if dto and isinstance(dto, dict):
+            author = dto.get("author")
+            if author:
+                book["author"] = author
+            else:
+                book["author"] = "Unknown Author"
+        else:
+            book["author"] = "Unknown Author"
+
     async def get_trending_books_ids(self) -> List[int]:
-        """Get trending book IDs."""
         query = """
         query GetTrendingBooks {
-            books_trending(from: "2010-01-01", limit: 10) {
+            books_trending(from: "2010-01-01", limit: 10, offset: 10) {
                 ids
             }
         }
         """
-        try:
-            result = await self.execute_query(query)
-            ids = result.get("books_trending", {}).get("ids", [])
-            if not ids:
-                print("No trending book IDs found.")
-            return ids
-        except Exception as e:
-            print(f"Error fetching trending book IDs: {str(e)}")
-            return []
+        result = await self.execute_query(query)
+        return result.get("books_trending", {}).get("ids", [])
 
     async def get_book_details_by_ids(self, book_ids: List[int]) -> List[Dict]:
         """Get book details by IDs."""
@@ -56,6 +57,7 @@ class GraphQLService:
             books(where: {id: {_in: $ids}}, distinct_on: title) {
                 id
                 title
+                author
                 release_year
                 release_date
                 images(limit: 1, where: {url: {_is_null: false}}) {
@@ -68,6 +70,7 @@ class GraphQLService:
                 pages
                 description
                 headline
+                price
             }
         }
         """
@@ -89,6 +92,7 @@ class GraphQLService:
             books(where: {title: {_ilike: $title}}, limit: 1) {
                 id
                 title
+                author
                 release_year
                 release_date
                 images(limit: 1, where: {url: {_is_null: false}}) {
@@ -101,6 +105,7 @@ class GraphQLService:
                 pages
                 description
                 headline
+                price
             }
         }
         """
@@ -115,8 +120,32 @@ class GraphQLService:
             print(f"Error fetching book details by title: {str(e)}")
             return []
 
+    async def get_book_details_by_title_chatbot(self, title: str) -> List[Dict]:
+        query = """
+        query MyQuery($title: String!) {
+            books(where: {title: {_ilike: $title, _is_null: false}}, limit: 1) {
+                title
+                release_year
+                pages
+                images(limit: 1, where: {url: {_is_null: false}}) {
+                  url
+                }
+                image{
+                  url
+                }
+            }
+        }
+        """
+        variables = {"title": title}
+        result = await self.execute_query(query, variables)
+        books = result.get("books", [])
+
+        for book in books:
+            self.extract_author_from_dto(book)
+        return books
+    
     def transform_books(self, books: List[Dict]) -> List[Dict]:
-        """Transform book data to match frontend structure."""
+        """Transform book data to match frontend BookDetails model."""
         transformed_books = []
         for book in books:
             image_url = None
@@ -130,6 +159,7 @@ class GraphQLService:
             transformed_book = {
                 "id": str(book.get("id", "")),
                 "title": book.get("title", "Unknown Title"),
+                "author": book.get("author", "Unknown Author"),
                 "release_year": book.get("release_year", "N/A"),
                 "release_date": book.get("release_date", "N/A"),
                 "image_url": image_url,
@@ -138,9 +168,10 @@ class GraphQLService:
                 "price": float(book.get("price", 9.99)),
                 "description": book.get("description", "No description available"),
                 "headline": book.get("headline", ""),
+                "ReasonForRecommendation": ""  # Will be filled by recommendation agent
             }
             transformed_books.append(transformed_book)
-        print(f"Transformed books: {transformed_books}")  # Debug statement
+        print(f"Transformed books: {transformed_books}")
         return transformed_books
 
 

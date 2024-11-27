@@ -137,7 +137,18 @@ class _ChatbotState extends State<Chatbot> {
         child: Padding(
           padding: const EdgeInsets.only(right: 16, bottom: 16),
           child: FloatingActionButton(
-            onPressed: () => setState(() => isOpen = true),
+            onPressed: () {
+            setState(() {
+              isOpen = true;
+              // Add the greeting message when chatbot is opened
+              if (messages.isEmpty) {
+                addMessage(
+                  "Welcome! I'm BookWorm, your personal book assistant. How can I help you today?",
+                  'bot',
+                );
+              }
+            });
+          },
             child: const FaIcon(FontAwesomeIcons.robot),
             backgroundColor: Colors.blue,
           ),
@@ -364,10 +375,9 @@ class _ChatbotState extends State<Chatbot> {
         break;
 
       case 'recommendation':
-        if (response is Map<String, dynamic> && response['books'] is List) {
-          final books = response['books'] as List<dynamic>;
+        if (response is List) {
           addMessage('Here are some book recommendations for you:', 'bot');
-          for (var bookJson in books) {
+          for (var bookJson in response) {
             final book = BookDetails.fromJson(bookJson);
             setState(() {
               messages.add(ChatMessage(
@@ -377,8 +387,14 @@ class _ChatbotState extends State<Chatbot> {
               ));
             });
           }
+        } else {
+          addMessage(
+            "I received a recommendation response, but I couldn't parse it. Please try again.",
+            'bot',
+          );
         }
         break;
+
 
       case 'order_confirmation':
         if (response is Map<String, dynamic>) {

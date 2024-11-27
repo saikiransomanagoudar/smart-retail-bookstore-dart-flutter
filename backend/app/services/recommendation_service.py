@@ -19,11 +19,6 @@ load_dotenv(dotenv_path)
 openai_api_key = os.getenv("OPENAI_API_KEY")
 llm = OpenAI(api_key=openai_api_key, temperature=0.7)
 
-# Cache storage with timestamps
-_trending_books_cache: Optional[List[Dict]] = None
-_cache_timestamp: Optional[datetime] = None
-CACHE_DURATION = timedelta(hours=1)
-
 def normalize_title(title: str) -> str:
     return re.split(r':|–|-', title)[-1].strip()
 
@@ -37,12 +32,6 @@ def safe_float(value: any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
-
-def is_cache_valid() -> bool:
-    """Check if the cache is still valid."""
-    if _trending_books_cache is None or _cache_timestamp is None:
-        return False
-    return datetime.now() - _cache_timestamp < CACHE_DURATION
 
 async def get_books(query: str = "", limit: int = 10) -> List[Dict]:
     """Get books using a basic query."""
@@ -166,31 +155,13 @@ def generate_llm_recommendations(preferences: dict) -> List[Dict]:
     )
 
 async def get_trending_books() -> List[Dict]:
-    """Get trending books with caching."""
-    global _trending_books_cache, _cache_timestamp
-
-    # Check cache first
-    if is_cache_valid():
-        logging.info("Returning cached trending books")
-        return _trending_books_cache
-
-    # If cache is invalid or empty, fetch new data
+    """Get trending books."""
     try:
         books = await get_books(limit=10)
         processed_books = [process_book(book) for book in books if book]
-        
-        # Update cache
-        _trending_books_cache = processed_books
-        _cache_timestamp = datetime.now()
-        
-        logging.info("Updated trending books cache")
         return processed_books
     except Exception as e:
         logging.error(f"Error fetching trending books: {str(e)}")
-        # If we have cached data, return it even if expired
-        if _trending_books_cache is not None:
-            logging.info("Returning expired cached data due to error")
-            return _trending_books_cache
         return []
 
 async def get_recommendations(user_id: str, db: Session) -> List[Dict]:

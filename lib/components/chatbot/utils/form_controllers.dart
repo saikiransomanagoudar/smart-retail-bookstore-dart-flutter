@@ -12,6 +12,10 @@ class OrderFormControllers {
     'cvv': TextEditingController(),
   };
 
+  static void reset() {
+    controllers.forEach((_, controller) => controller.clear());
+  }
+
   static void dispose() {
     controllers.forEach((_, controller) => controller.dispose());
   }

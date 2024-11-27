@@ -27,13 +27,12 @@ Widget buildBookCard(BookDetails book, Function(BookDetails) addToCart) {
             width: 60,
             height: 90,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) =>
-              Container(
-                width: 60,
-                height: 90,
-                color: Colors.grey.shade200,
-                child: Icon(Icons.book, color: Colors.grey),
-              ),
+            errorBuilder: (context, error, stackTrace) => Container(
+              width: 60,
+              height: 90,
+              color: Colors.grey.shade200,
+              child: Icon(Icons.book, color: Colors.grey),
+            ),
           ),
         ),
         SizedBox(width: 12),
@@ -50,7 +49,7 @@ Widget buildBookCard(BookDetails book, Function(BookDetails) addToCart) {
               ),
               SizedBox(height: 4),
               Text(
-                'By ${book.author}',
+                'Published: ${book.releaseYear}',
                 style: TextStyle(
                   color: Colors.grey.shade700,
                   fontSize: 14,
@@ -62,7 +61,7 @@ Widget buildBookCard(BookDetails book, Function(BookDetails) addToCart) {
                   Icon(Icons.star, size: 16, color: Colors.amber),
                   SizedBox(width: 4),
                   Text(
-                    book.rating.toStringAsFixed(1),
+                    book.rating != null ? book.rating!.toStringAsFixed(1) : 'N/A',
                     style: TextStyle(fontSize: 14),
                   ),
                   Text(
@@ -75,6 +74,14 @@ Widget buildBookCard(BookDetails book, Function(BookDetails) addToCart) {
                 ],
               ),
               SizedBox(height: 8),
+              Text(
+                book.reasonForRecommendation,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+              SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -83,7 +90,6 @@ Widget buildBookCard(BookDetails book, Function(BookDetails) addToCart) {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: Colors.green.shade700,
                     ),
                   ),
                   ElevatedButton.icon(
