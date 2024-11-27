@@ -6,145 +6,136 @@ from pydantic import BaseModel
 import json
 import logging
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
 class OperatorResponse(BaseModel):
     """Schema for operator agent's routing decision."""
-    intent: Literal["order", "order_query", "fraud", "recommendation", "unknown"]
+    intent: Literal["order", "fraud", "recommendation", "unknown"]
     confidence: float
     routing: Literal["OrderAgent", "OrderQueryAgent", "FraudAgent", "RecommendationAgent", "FINISH"]
     metadata: Dict[str, Any] = {}
 
 class OperatorAgent:
     def __init__(self):
-        self.llm = ChatOpenAI(temperature=0.7, model="gpt-4o-mini")
+        self.llm = ChatOpenAI(temperature=0.3, model="gpt-4o-mini")
         self.intent_prompt = self._setup_prompt()
 
     def _setup_prompt(self) -> ChatPromptTemplate:
         """Initialize prompts for intent detection."""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are an intent classification agent. Analyze user messages or prompts and determine the appropriate intent and routing.
-            Possible intents are:
-            - recommendation: Book recommendations, suggestions, or preferences
-            - order: Placing an order or purchasing products
-            - order_query: Order tracking, shipping status, order date, etc.
-            - fraud: Fraudulent transactions, payment disputes, or damaged products
-            - unknown: Unclear intent requiring clarification
+            ("system", """Determine the user's intents based on the following input: '{input}'.
+            Important: Always include "Agent" in routing values.
+
+            Possible intents and routings:
+            - For book recommendations:
+            intent: "recommendation"
+            routing: "RecommendationAgent"
+            
+            - For placing orders, order status, or order queries:
+            intent: "order"
+            routing: "OrderAgent"
+            
+            - For complaints/issues:
+            intent: "fraud"
+            routing: "FraudAgent"
+            
+            - For unclear requests:
+            intent: "unknown"
+            routing: "FINISH"
 
             Respond in JSON format:
             {{
                 "intent": "<intent>",
                 "confidence": <confidence_score>,
-                "routing": "<routing>"
-            }}
-
-            Examples:
-            - User: "Can you recommend some mystery books?" -> {{"intent": "recommendation", "confidence": 0.9, "routing": "RecommendationAgent"}}
-            - User: "I want to buy The Great Gatsby" -> {{"intent": "order", "confidence": 0.9, "routing": "OrderAgent"}}
-            """),
-            ("human", "{input}")
+                "routing": "<routing>",
+                "is_intent_switch": <boolean>
+            }}"""),
+            ("human", """Previous context: {current_context}
+            Current message: {input}""")
         ])
 
     async def analyze_intent(self, state: Dict[str, Any]) -> OperatorResponse:
-        """Analyze user intent and determine routing."""
-        logger.info("=== Starting Intent Analysis ===")
-        messages = state.get("messages", [])
-        
-        if not messages:
-            logger.warning("No messages found in state.")
-            return self._default_response("No messages found.")
-
+        """Analyze user intent with better context switching."""
         try:
-            # Extract the latest message content
-            last_message = messages[-1]
-            if isinstance(last_message, HumanMessage):
-                original_message = last_message.content.strip()
-            else:
-                original_message = last_message.get("content", "").strip()
+            messages = state.get("messages", [])
+            if not messages:
+                return self._create_default_response("No messages found.")
 
-            logger.info(f"Processing message: {original_message}")
+            current_message = messages[-1].content if isinstance(messages[-1], HumanMessage) else messages[-1].get("content", "")
+            current_context = state.get("metadata", {}).get("routing", "")
 
-            # Validate input
-            if not original_message:
-                return self._default_response("Empty message content.")
+            logger.info(f"Processing message: {current_message}")
+            logger.info(f"Current context: {current_context}")
 
-            # Attempt keyword-based routing first
-            keyword_decision = self._map_intent_to_routing(original_message)
-            if keyword_decision["intent"] != "unknown":
-                logger.info(f"Keyword-based intent match: {keyword_decision}")
-                return OperatorResponse(**keyword_decision)
+            # Direct mapping for recommendation keywords
+            recommendation_keywords = {"recommend", "book", "reading", "suggestion", "like", "interested"}
+            if any(keyword in current_message.lower() for keyword in recommendation_keywords):
+                return OperatorResponse(
+                    intent="recommendation",
+                    confidence=0.9,
+                    routing="RecommendationAgent",  # Explicitly using correct routing value
+                    metadata={"method": "keyword"}
+                )
 
-            # Use LLM if no keyword match
-            logger.info("No keyword match; invoking LLM.")
+            # Use LLM for other cases
             response = await self.llm.ainvoke(
-                self.intent_prompt.format_messages(input=original_message)
+                self.intent_prompt.format_messages(
+                    input=current_message,
+                    current_context=current_context
+                )
             )
 
             if isinstance(response, AIMessage):
-                llm_raw_response = response.content.strip()
-                logger.info(f"Raw LLM response: {llm_raw_response}")
+                llm_decision = json.loads(response.content.strip())
+                logger.info(f"LLM decision: {llm_decision}")  # Add this debug log
+                
+                # Ensure correct routing value format
+                routing = llm_decision.get("routing", "FINISH")
+                if routing == "recommendation":
+                    routing = "RecommendationAgent"
+                elif routing == "order":
+                    routing = "OrderAgent"
+                elif routing == "fraud":
+                    routing = "FraudAgent"
 
-                try:
-                    llm_decision = json.loads(llm_raw_response)
-                    return OperatorResponse(
-                        intent=llm_decision.get("intent", "unknown"),
-                        confidence=llm_decision.get("confidence", 0.0),
-                        routing=llm_decision.get("routing", "FINISH"),
-                        metadata={"method": "llm"}
-                    )
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid LLM response format: {e}")
-                    return self._default_response("Invalid LLM response format.")
-            else:
-                return self._default_response("Unexpected LLM response type.")
+                return OperatorResponse(
+                    intent=llm_decision.get("intent", "unknown"),
+                    confidence=llm_decision.get("confidence", 0.0),
+                    routing=routing,
+                    metadata={
+                        "method": "llm",
+                        "is_intent_switch": llm_decision.get("is_intent_switch", False)
+                    }
+                )
+
         except Exception as e:
-            logger.error(f"Error during intent analysis: {e}")
-            return self._default_response(str(e))
+            logger.error(f"Error during intent analysis: {str(e)}")
+            return self._create_default_response(str(e))
+
+    def _create_default_response(self, error: str) -> OperatorResponse:
+        """Generate a default response for errors."""
+        return OperatorResponse(
+            intent="recommendation",
+            confidence=0.7,
+            routing="RecommendationAgent",  # Always use correct routing value
+            metadata={"error": error}
+        )
 
     def _map_intent_to_routing(self, message: str) -> Dict[str, Any]:
-        """Fallback method to determine intent based on keywords."""
+        """Map intent to correct routing value."""
         message_lower = message.lower()
-        logger.info(f"Analyzing message for keywords: {message_lower}")
-
-        keywords = {
-            "recommendation": [
-                "recommend", "suggest", "looking for", "interested in", "like",
-                "enjoy", "read", "popular", "favorite", "books"
-            ],
-            "order": [
-                "buy", "purchase", "order", "cart", "checkout", "payment", "price"
-            ],
-            "order_query": [
-                "where", "status", "track", "when", "delivery", "shipped", "arrive"
-            ],
-            "fraud": [
-                "damaged", "wrong", "broken", "missing", "fraud", "refund",
-                "complaint", "issue"
-            ]
-        }
-
-        for intent, words in keywords.items():
-            if any(word in message_lower for word in words):
-                return {
-                    "intent": intent,
-                    "confidence": 0.8,
-                    "routing": f"{intent.capitalize()}Agent",
-                    "metadata": {"method": "keyword"}
-                }
-
+        
+        if any(word in message_lower for word in ["recommend", "book", "reading"]):
+            return {
+                "intent": "recommendation",
+                "confidence": 0.8,
+                "routing": "RecommendationAgent",  # Correct routing value
+                "metadata": {"method": "keyword"}
+            }
+        
         return {
             "intent": "unknown",
             "confidence": 0.5,
             "routing": "FINISH",
             "metadata": {"method": "keyword"}
         }
-
-    def _default_response(self, error: str) -> OperatorResponse:
-        """Generate a default response for errors."""
-        return OperatorResponse(
-            intent="unknown",
-            confidence=0.0,
-            routing="FINISH",
-            metadata={"error": error}
-        )

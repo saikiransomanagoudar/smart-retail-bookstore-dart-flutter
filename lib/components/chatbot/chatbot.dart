@@ -12,9 +12,12 @@ import 'widgets/order_form.dart';
 import 'widgets/book_card.dart';
 
 import 'utils/form_controllers.dart';
+import 'package:provider/provider.dart';
+import '../../auth_provider.dart';
 
 class Chatbot extends StatefulWidget {
-  const Chatbot({Key? key}) : super(key: key);
+  final String? userId;
+  const Chatbot({Key? key, this.userId,}) : super(key: key);
 
   @override
   _ChatbotState createState() => _ChatbotState();
@@ -32,7 +35,6 @@ class _ChatbotState extends State<Chatbot> {
   final _formKey = GlobalKey<FormState>();
   final Map<String, TextEditingController> _controllers = OrderFormControllers.controllers;
 
-  // Add cart total calculation
   double get cartTotal => cartItems.fold(
         0,
         (sum, item) => sum + (item.price * item.quantity),
@@ -46,11 +48,19 @@ class _ChatbotState extends State<Chatbot> {
     setState(() {
       messages.add(ChatMessage(content: content, sender: sender, type: type));
     });
-    _scrollController.animateTo(
-      _scrollController.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOut,
-    );
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   Widget buildCartSummaryWidget() {
@@ -64,6 +74,7 @@ class _ChatbotState extends State<Chatbot> {
 
   Widget buildOrderFormWidget() {
     return buildOrderForm(
+      context,
       _formKey,
       _controllers,
       cartItems,
@@ -80,7 +91,6 @@ class _ChatbotState extends State<Chatbot> {
     );
   }
 
-
   Future<void> sendMessage(String message) async {
     setState(() {
       isLoading = true;
@@ -89,14 +99,13 @@ class _ChatbotState extends State<Chatbot> {
     debugLog('Sending message: $message');
 
     try {
-      // Convert current messages to format backend expects
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.userId;
+
       final messageHistory = messages.map((msg) => {
-        'content': json.encode({
-          'original_message': msg.content,
-          'type': msg.type,
-          'metadata': {}
-        }),
-        'role': msg.sender
+        'content': msg.content,
+        'type': msg.type,
+        'sender': msg.sender,
       }).toList();
 
       final response = await http.post(
@@ -104,7 +113,10 @@ class _ChatbotState extends State<Chatbot> {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'message': message,
-          'messages': messageHistory  // Include conversation history
+          'messages': messageHistory,
+          'metadata': {
+            'user_id': userId,
+          }
         }),
       );
 
@@ -129,6 +141,226 @@ class _ChatbotState extends State<Chatbot> {
     }
   }
 
+  void handleBotResponse(Map<String, dynamic> data) {
+  debugLog('Processing bot response: ${json.encode(data)}');
+
+  final type = data['type'];
+  final response = data['response'];
+
+  // Helper function to clean text
+  String cleanText(String text) {
+    return text
+        .replaceAll('â€™', "'")
+        .replaceAll('â€œ', '"')
+        .replaceAll('â€', '"')
+        .replaceAll('donâ€™t', "don't");
+  }
+
+  switch (type) {
+    case 'recommendation':
+      if (response is Map<String, dynamic>) {
+        // Display the recommendation message
+        if (response['message'] != null) {
+          addMessage(cleanText(response['message']), 'bot');
+        }
+
+        // Process the list of books
+        if (response['books'] is List) {
+          final books = response['books'] as List<dynamic>;
+          debugLog('Processing ${books.length} book recommendations');
+
+          for (var bookJson in books) {
+            try {
+              debugLog('Processing book: ${json.encode(bookJson)}');
+
+              // Clean text fields in book data
+              if (bookJson is Map<String, dynamic>) {
+                bookJson['description'] = cleanText(bookJson['description'] ?? '');
+                bookJson['title'] = cleanText(bookJson['title'] ?? '');
+                bookJson['ReasonForRecommendation'] =
+                    cleanText(bookJson['ReasonForRecommendation'] ?? '');
+              }
+
+              // Render the book card
+              final book = BookDetails.fromJson(bookJson);
+              setState(() {
+                messages.add(ChatMessage(
+                  content: json.encode(bookJson),
+                  sender: 'bot',
+                  type: 'book_recommendation',
+                ));
+              });
+            } catch (e) {
+              debugLog('Error processing book: $e');
+            }
+          }
+        }
+      }
+      break;
+
+    case 'clarification':
+    case 'error':
+      if (response is Map<String, dynamic> && response['message'] != null) {
+        addMessage(cleanText(response['message']), 'bot', type);
+      } else if (response is String) {
+        addMessage(cleanText(response), 'bot', type);
+      }
+      break;
+
+    case 'order_response':
+      if (response is Map<String, dynamic>) {
+        final message = response['message'] as String?;
+        final orderDetails = response['order_details'];
+
+        if (orderDetails is List) {
+          // Format multiple orders
+          final formattedOrders = orderDetails.map((order) => '''
+    Order ID: ${order['order_id']}
+    Title: ${order['title']}
+    Price: \$${order['price'].toStringAsFixed(2)}
+    Quantity: ${order['total_quantity']}
+    Purchase Date: ${order['purchase_date']}
+    Expected Delivery: ${order['expected_delivery']}
+    ''').join('\n-------------------\n');
+
+          addMessage(
+            '${message ?? "Your Orders:"}\n\n$formattedOrders',
+            'bot',
+            'order_response'
+          );
+        } else if (orderDetails is Map<String, dynamic>) {
+          // Format single order
+          final order = orderDetails;
+          final formattedOrder = '''
+    Order ID: ${order['order_id']}
+    Title: ${order['title']}
+    Price: \$${order['price'].toStringAsFixed(2)}
+    Quantity: ${order['total_quantity']}
+    Purchase Date: ${order['purchase_date']}
+    Expected Delivery: ${order['expected_delivery']}
+    ''';
+
+          addMessage(
+            '${message ?? "Order Details:"}\n\n$formattedOrder',
+            'bot',
+            'order_response'
+          );
+        }
+      }
+      break;
+
+    case 'greeting':
+    case 'question':
+    case 'general':
+      if (response is String) {
+        addMessage(cleanText(response), 'bot', type);
+      }
+      break;
+
+    case 'order_confirmation':
+      if (response is Map<String, dynamic>) {
+        final message = cleanText('''Order Confirmation:
+Order ID: ${response['order_id']}
+Total Cost: \$${response['total_cost']}
+Order Date: ${response['order_placed_on']}
+Expected Delivery: ${response['expected_delivery']}
+${response['message']}''');
+        addMessage(message, 'bot', 'order_confirmation');
+      }
+      break;
+
+    default:
+      debugLog('Unhandled response type: $type');
+      if (response is String) {
+        addMessage(cleanText(response), 'bot', 'text');
+      } else {
+        addMessage(
+          cleanText(
+              "I received your message but I'm not sure how to display the response. Can you try rephrasing your request?"),
+          'bot',
+          'error',
+        );
+      }
+  }
+  _scrollToBottom();
+}
+
+
+  Widget buildMessageBubble(ChatMessage msg) {
+    if (msg.type == 'book_recommendation') {
+      try {
+        debugLog('Rendering book card from: ${msg.content}');
+        final bookData = json.decode(msg.content) as Map<String, dynamic>;
+        final book = BookDetails.fromJson(bookData);
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: buildBookCardWidget(book),
+        );
+      } catch (e) {
+        debugLog('Error rendering book card: $e');
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'Error displaying book details: $e',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        );
+      }
+    }
+
+    return Align(
+      alignment: msg.sender == 'user' ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(12),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.7,
+        ),
+        decoration: BoxDecoration(
+          color: msg.sender == 'user' ? Colors.blue.shade100 : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          msg.content,
+          style: const TextStyle(fontSize: 14),
+        ),
+      ),
+    );
+  }
+
+  void addToCart(BookDetails book) {
+    setState(() {
+      final existingItem = cartItems.firstWhere(
+        (item) => item.id == book.id,
+        orElse: () => CartItem(
+          id: book.id,
+          title: book.title,
+          price: book.price,
+          imageUrl: book.imageUrl,
+        ),
+      );
+
+      if (cartItems.contains(existingItem)) {
+        existingItem.quantity++;
+      } else {
+        cartItems.add(existingItem);
+      }
+
+      addMessage(
+        'Added "${book.title}" to cart. Current quantity: ${existingItem.quantity}',
+        'bot',
+        'cart_update',
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!isOpen) {
@@ -137,7 +369,18 @@ class _ChatbotState extends State<Chatbot> {
         child: Padding(
           padding: const EdgeInsets.only(right: 16, bottom: 16),
           child: FloatingActionButton(
-            onPressed: () => setState(() => isOpen = true),
+            onPressed: () {
+              setState(() {
+                isOpen = true;
+                if (messages.isEmpty) {
+                  addMessage(
+                    "Welcome! I'm BookWorm, your personal book assistant. How can I help you today?",
+                    'bot',
+                    'greeting'
+                  );
+                }
+              });
+            },
             child: const FaIcon(FontAwesomeIcons.robot),
             backgroundColor: Colors.blue,
           ),
@@ -165,7 +408,6 @@ class _ChatbotState extends State<Chatbot> {
           ),
           child: Column(
             children: [
-              // Chat header
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: const BoxDecoration(
@@ -191,63 +433,22 @@ class _ChatbotState extends State<Chatbot> {
                   ],
                 ),
               ),
-              // Messages area
               Expanded(
                 child: ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(16),
                   itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final msg = messages[index];
-                    if (msg.type == 'book_recommendation') {
-                      try {
-                        final bookData = json.decode(msg.content) as Map<String, dynamic>;
-                        final book = BookDetails.fromJson(bookData);
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: buildBookCardWidget(book),
-                        );
-                      } catch (e) {
-                        debugLog('Error rendering book card: $e');
-                        return const Text('Error displaying book details.');
-                      }
-                    }
-                    return Align(
-                      alignment: msg.sender == 'user'
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.all(12),
-                        constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.7,
-                        ),
-                        decoration: BoxDecoration(
-                          color: msg.sender == 'user'
-                              ? Colors.blue.shade100
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          msg.content,
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
-                    );
-                  },
+                  itemBuilder: (context, index) => buildMessageBubble(messages[index]),
                 ),
               ),
-              // Cart summary if items in cart
               if (cartItems.isNotEmpty && !showOrderForm) buildCartSummaryWidget(),
-              // Order form if showing
               if (showOrderForm) buildOrderFormWidget(),
-              // Input area
               Container(
                 padding: const EdgeInsets.all(8.0),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                  boxShadow: const [
+                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+                  boxShadow: [
                     BoxShadow(
                       color: Colors.black12,
                       blurRadius: 4,
@@ -319,134 +520,6 @@ class _ChatbotState extends State<Chatbot> {
         ),
       ),
     );
-  }
-
-  void addToCart(BookDetails book) {
-    setState(() {
-      final existingItem = cartItems.firstWhere(
-        (item) => item.id == book.id,
-        orElse: () => CartItem(
-          id: book.id,
-          title: book.title,
-          price: book.price,
-          imageUrl: book.imageUrl,
-        ),
-      );
-
-      if (cartItems.contains(existingItem)) {
-        existingItem.quantity++;
-      } else {
-        cartItems.add(existingItem);
-      }
-
-      addMessage(
-        'Added "${book.title}" to cart. Current quantity: ${existingItem.quantity}',
-        'bot',
-        'cart_update',
-      );
-    });
-  }
-
-  void handleBotResponse(Map<String, dynamic> data) {
-    final type = data['type'];
-    final response = data['response'];
-
-    switch (type) {
-      case 'greeting':
-      case 'clarification':
-      case 'question':
-      case 'order_question':
-      case 'general':
-      case 'order':
-      case 'order_query':
-      case 'error':
-        if (response is String) addMessage(response, 'bot');
-        break;
-
-      case 'recommendation':
-        if (response is Map<String, dynamic> && response['books'] is List) {
-          final books = response['books'] as List<dynamic>;
-          addMessage('Here are some book recommendations for you:', 'bot');
-          for (var bookJson in books) {
-            final book = BookDetails.fromJson(bookJson);
-            setState(() {
-              messages.add(ChatMessage(
-                content: json.encode(book),
-                sender: 'bot',
-                type: 'book_recommendation',
-              ));
-            });
-          }
-        }
-        break;
-
-      case 'order_confirmation':
-        if (response is Map<String, dynamic>) {
-          addMessage(
-            '''Order Confirmation:
-Order ID: ${response['order_id']}
-Total Cost: \$${response['total_cost']}
-Order Date: ${response['order_placed_on']}
-Expected Delivery: ${response['expected_delivery']}
-${response['message']}''',
-            'bot',
-            'order_confirmation',
-          );
-        }
-        break;
-
-      case 'order_info':
-        if (response is Map<String, dynamic>) {
-          final status = response['status'] ?? 'Processing';
-          final deliveryDate = response['expected_delivery'] ?? 'Not available';
-
-          addMessage(
-            '''Order Details:
-Order ID: ${response['order_id']}
-Status: $status
-Expected Delivery: $deliveryDate
-Total Cost: \$${response['total_cost']}''',
-            'bot',
-            'order_info',
-          );
-
-          if (response['items'] is List) {
-            addMessage('Order Items:', 'bot');
-            for (var item in response['items']) {
-              addMessage(
-                '- ${item['title']} (Qty: ${item['quantity']}) - \$${item['price']}',
-                'bot',
-                'order_item',
-              );
-            }
-          }
-        }
-        break;
-
-      case 'system':
-        addMessage(response, 'bot', 'system');
-        break;
-
-      default:
-        if (response is String) {
-          addMessage(response, 'bot');
-        } else {
-          addMessage(
-            "I received your message but I'm not sure how to display the response. Can you try rephrasing your request?",
-            'bot',
-          );
-        }
-    }
-
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   @override
