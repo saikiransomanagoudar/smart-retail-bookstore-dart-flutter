@@ -30,8 +30,8 @@ class GraphQLService:
                 print(f"GraphQL query failed: {str(e)}")
                 return {}
 
-    async def get_trending_books_ids(self) -> List[Dict]:
-        """Get trending books with full details."""
+    async def get_trending_books_ids(self) -> List[int]:
+        """Get trending book IDs."""
         query = """
         query GetTrendingBooks {
             books_trending(from: "2010-01-01", limit: 10) {
@@ -41,9 +41,12 @@ class GraphQLService:
         """
         try:
             result = await self.execute_query(query)
-            return result.get("books_trending", {}).get("ids", [])
+            ids = result.get("books_trending", {}).get("ids", [])
+            if not ids:
+                print("No trending book IDs found.")
+            return ids
         except Exception as e:
-            print(f"Error fetching trending books: {str(e)}")
+            print(f"Error fetching trending book IDs: {str(e)}")
             return []
 
     async def get_book_details_by_ids(self, book_ids: List[int]) -> List[Dict]:
@@ -71,7 +74,10 @@ class GraphQLService:
         variables = {"ids": book_ids}
         try:
             result = await self.execute_query(query, variables)
-            return result.get("books", [])
+            books = result.get("books", [])
+            if not books:
+                print(f"No book details found for IDs: {book_ids}")
+            return books
         except Exception as e:
             print(f"Error fetching book details: {str(e)}")
             return []
@@ -101,12 +107,16 @@ class GraphQLService:
         variables = {"title": f"%{title}%"}
         try:
             result = await self.execute_query(query, variables)
-            return result.get("books", [])
+            books = result.get("books", [])
+            if not books:
+                print(f"No book details found for title: {title}")
+            return books
         except Exception as e:
-            print(f"Error fetching book details: {str(e)}")
+            print(f"Error fetching book details by title: {str(e)}")
             return []
 
     def transform_books(self, books: List[Dict]) -> List[Dict]:
+        """Transform book data to match frontend structure."""
         transformed_books = []
         for book in books:
             image_url = None
@@ -114,20 +124,24 @@ class GraphQLService:
                 image_url = book["images"][0].get("url")
             elif book.get("image"):
                 image_url = book["image"].get("url")
+            else:
+                image_url = "https://via.placeholder.com/150"  # Fallback placeholder
 
             transformed_book = {
                 "id": str(book.get("id", "")),
                 "title": book.get("title", "Unknown Title"),
-                "release_year": book.get("release_year"),
-                "release_date": book.get("release_date"),
+                "release_year": book.get("release_year", "N/A"),
+                "release_date": book.get("release_date", "N/A"),
                 "image_url": image_url,
                 "rating": float(book.get("rating", 0)),
-                "pages": book.get("pages"),
+                "pages": book.get("pages", 0),
                 "price": float(book.get("price", 9.99)),
-                "description": book.get("description", ""),
-                "headline": book.get("headline", "")
+                "description": book.get("description", "No description available"),
+                "headline": book.get("headline", ""),
             }
             transformed_books.append(transformed_book)
+        print(f"Transformed books: {transformed_books}")  # Debug statement
         return transformed_books
+
 
 graphql_service = GraphQLService(settings.HARDCOVER_API_TOKEN)

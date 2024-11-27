@@ -8,4 +8,16 @@ class ChatMessage {
     required this.sender,
     this.type = 'text',
   });
+
+  Map<String, dynamic> toJson() => {
+    'content': content,
+    'sender': sender,
+    'type': type,
+  };
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
+    content: json['content'],
+    sender: json['sender'],
+    type: json['type'] ?? 'text',
+  );
 }

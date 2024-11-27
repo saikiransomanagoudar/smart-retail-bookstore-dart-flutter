@@ -4,55 +4,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'models/message.dart';
-import 'models/book_details.dart' as book_details;
-
+import 'models/book_details.dart';
 import 'models/cart_item.dart';
-import 'widgets/book_card.dart';
+
 import 'widgets/cart_summary.dart';
 import 'widgets/order_form.dart';
+import 'widgets/book_card.dart';
 
 import 'utils/form_controllers.dart';
-
-class ChatMessage {
-  final String content;
-  final String sender;
-  final String type;
-
-  ChatMessage({
-    required this.content,
-    required this.sender,
-    this.type = 'text',
-  });
-}
-
-class Book {
-  final String title;
-  final String pages;
-  final String releaseYear;
-  final String price;
-  final String reasonForRecommendation;
-  final String imageUrl;
-
-  Book({
-    required this.title,
-    required this.pages,
-    required this.releaseYear,
-    required this.price,
-    required this.reasonForRecommendation,
-    required this.imageUrl,
-  });
-
-  factory Book.fromJson(Map<String, dynamic> json) {
-    return Book(
-      title: json['title'] ?? 'Untitled',
-      pages: json['pages']?.toString() ?? 'N/A',
-      releaseYear: json['release_year']?.toString() ?? 'N/A',
-      price: json['Price']?.toString() ?? 'N/A',
-      reasonForRecommendation: json['ReasonForRecommendation'] ?? 'No recommendation reason provided.',
-      imageUrl: json['image_url'] ?? 'https://via.placeholder.com/100x150?text=No+Image',
-    );
-  }
-}
 
 class Chatbot extends StatefulWidget {
   const Chatbot({Key? key}) : super(key: key);
@@ -62,38 +21,66 @@ class Chatbot extends StatefulWidget {
 }
 
 class _ChatbotState extends State<Chatbot> {
+  final ScrollController _scrollController = ScrollController();
   bool isOpen = false;
   List<ChatMessage> messages = [];
   final TextEditingController _inputController = TextEditingController();
   bool isLoading = false;
-  Map<String, dynamic> cart = {};
-  bool isOrderProcessing = false;
-  bool isOrderComplete = false;
-  String? tempMessage;
-  final ScrollController _scrollController = ScrollController();
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (messages.isEmpty) {
-        setState(() {
-          messages.add(
-            ChatMessage(
-              content: "Welcome! I'm BookWorm, your virtual assistant. I'm here to help you browse and find the perfect book for your collection. Ready to start exploring?",
-              sender: "bot",
-            ),
-          );
-        });
-      }
-    });
-  }
+  List<CartItem> cartItems = [];
+  bool showOrderForm = false;
+  final _formKey = GlobalKey<FormState>();
+  final Map<String, TextEditingController> _controllers = OrderFormControllers.controllers;
+
+  // Add cart total calculation
+  double get cartTotal => cartItems.fold(
+        0,
+        (sum, item) => sum + (item.price * item.quantity),
+      );
 
   void debugLog(String message) {
     print('ChatBot Debug: $message');
   }
 
-  // Update your sendMessage method
+  void addMessage(String content, String sender, [String type = 'text']) {
+    setState(() {
+      messages.add(ChatMessage(content: content, sender: sender, type: type));
+    });
+    _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget buildCartSummaryWidget() {
+    return buildCartSummary(
+      cartItems,
+      cartTotal,
+      showOrderForm,
+      (value) => setState(() => showOrderForm = value),
+    );
+  }
+
+  Widget buildOrderFormWidget() {
+    return buildOrderForm(
+      _formKey,
+      _controllers,
+      cartItems,
+      showOrderForm,
+      (value) => setState(() => showOrderForm = value),
+      addMessage,
+    );
+  }
+
+  Widget buildBookCardWidget(BookDetails book) {
+    return buildBookCard(
+      book,
+      (b) => addToCart(b),
+    );
+  }
+
+
   Future<void> sendMessage(String message) async {
     setState(() {
       isLoading = true;
@@ -102,10 +89,23 @@ class _ChatbotState extends State<Chatbot> {
     debugLog('Sending message: $message');
 
     try {
+      // Convert current messages to format backend expects
+      final messageHistory = messages.map((msg) => {
+        'content': json.encode({
+          'original_message': msg.content,
+          'type': msg.type,
+          'metadata': {}
+        }),
+        'role': msg.sender
+      }).toList();
+
       final response = await http.post(
         Uri.parse('http://localhost:8000/api/chatbot/chat'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'message': message}),
+        body: json.encode({
+          'message': message,
+          'messages': messageHistory  // Include conversation history
+        }),
       );
 
       debugLog('Response status code: ${response.statusCode}');
@@ -129,198 +129,6 @@ class _ChatbotState extends State<Chatbot> {
     }
   }
 
-  void addMessage(String content, String sender, [String type = 'text']) {
-    setState(() {
-      messages.add(ChatMessage(
-        content: content,
-        sender: sender,
-        type: type,
-      ));
-    });
-    
-    Future.delayed(Duration(milliseconds: 100), () {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  void handleBotResponse(Map<String, dynamic> data) {
-    String type = data['type'];
-    dynamic response = data['response'];
-    
-    print('Received response - Type: $type, Content: $response'); // Debug log
-
-    switch (type) {
-      case 'greeting':
-      case 'clarification':
-      case 'question':
-      case 'order_question':
-      case 'general':
-      case 'order':
-      case 'order_query':
-      case 'error':
-        // Handle text responses
-        if (response is String) {
-          addMessage(response, 'bot');
-        }
-        break;
-
-      case 'recommendation':
-        if (response is List) {
-          // Handle book recommendations
-          addMessage('Here are some book recommendations for you:', 'bot');
-          for (var book in response) {
-            try {
-              Book bookObj = Book.fromJson(book);
-              addMessage(
-                '''Title: ${bookObj.title}
-Price: \$${bookObj.price}
-Reason: ${bookObj.reasonForRecommendation}''',
-                'bot',
-                'recommendation'
-              );
-            } catch (e) {
-              print('Error parsing book: $e');
-            }
-          }
-          addMessage('Would you like more recommendations or have questions about these books?', 'bot');
-        } else if (response is String) {
-          addMessage(response, 'bot');
-        }
-        break;
-
-      case 'order_confirmation':
-        if (response is Map<String, dynamic>) {
-          addMessage(
-            '''Order Confirmation:
-Order ID: ${response['order_id']}
-Total Cost: \$${response['total_cost']}
-Order Date: ${response['order_placed_on']}
-Expected Delivery: ${response['expected_delivery']}
-${response['message']}''',
-            'bot',
-            'order_confirmation'
-          );
-        } else if (response is String) {
-          addMessage(response, 'bot');
-        }
-        break;
-
-      case 'order_info':
-        if (response is Map<String, dynamic>) {
-          String status = response['status'] ?? 'Processing';
-          String deliveryDate = response['expected_delivery'] ?? 'Not available';
-          
-          addMessage(
-            '''Order Details:
-Order ID: ${response['order_id']}
-Status: $status
-Expected Delivery: $deliveryDate
-Total Cost: \$${response['total_cost']}''',
-            'bot',
-            'order_info'
-          );
-          
-          if (response['items'] != null && response['items'] is List) {
-            addMessage('Order Items:', 'bot');
-            for (var item in response['items']) {
-              addMessage(
-                '- ${item['title']} (Qty: ${item['quantity']}) - \$${item['price']}',
-                'bot',
-                'order_item'
-              );
-            }
-          }
-        } else if (response is String) {
-          addMessage(response, 'bot');
-        }
-        break;
-
-      case 'system':
-        // Handle system messages
-        addMessage(response, 'bot', 'system');
-        break;
-
-      default:
-        // Handle any unrecognized response types
-        if (response is String) {
-          addMessage(response, 'bot');
-        } else {
-          addMessage("I received your message but I'm not sure how to display the response. Can you try rephrasing your request?", 'bot');
-        }
-    }
-
-    // Auto-scroll to the bottom after adding new messages
-    Future.delayed(Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-}
-
-Widget buildMessageContent(ChatMessage msg, BuildContext context) {
-  switch (msg.type) {
-    case 'recommendation':
-    case 'order_info':
-    case 'order_confirmation':
-      return Container(
-        padding: EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.blue.shade200),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          msg.content,
-          style: TextStyle(fontSize: 14),
-        ),
-      );
-    
-    case 'order_item':
-      return Container(
-        padding: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-        margin: EdgeInsets.only(left: 16),
-        decoration: BoxDecoration(
-          color: Colors.grey.shade50,
-          border: Border.all(color: Colors.grey.shade200),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          msg.content,
-          style: TextStyle(fontSize: 13),
-        ),
-      );
-    
-    case 'system':
-      return Container(
-        padding: EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.yellow.shade50,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          msg.content,
-          style: TextStyle(
-            fontSize: 14,
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      );
-    
-    default:
-      return Text(
-        msg.content,
-        style: TextStyle(fontSize: 14),
-      );
-  }
-}
-
   @override
   Widget build(BuildContext context) {
     if (!isOpen) {
@@ -330,7 +138,7 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
           padding: const EdgeInsets.only(right: 16, bottom: 16),
           child: FloatingActionButton(
             onPressed: () => setState(() => isOpen = true),
-            child: FaIcon(FontAwesomeIcons.robot),
+            child: const FaIcon(FontAwesomeIcons.robot),
             backgroundColor: Colors.blue,
           ),
         ),
@@ -348,7 +156,7 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
-              BoxShadow(
+              const BoxShadow(
                 color: Colors.black26,
                 blurRadius: 10,
                 offset: Offset(0, 2),
@@ -360,7 +168,7 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
               // Chat header
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.blue,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
                 ),
@@ -383,7 +191,6 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
                   ],
                 ),
               ),
-              
               // Messages area
               Expanded(
                 child: ListView.builder(
@@ -392,68 +199,55 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final msg = messages[index];
-                    debugLog('Building message at index $index: ${msg.content}');
-                    
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        left: msg.sender == 'user' ? 50.0 : 0.0,
-                        right: msg.sender == 'user' ? 0.0 : 50.0,
-                        bottom: 8.0,
-                      ),
-                      child: Align(
-                        alignment: msg.sender == 'user' 
-                            ? Alignment.centerRight 
-                            : Alignment.centerLeft,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: msg.sender == 'user' 
-                                ? Colors.blue.shade100 
-                                : Colors.grey.shade100,
-                            borderRadius: BorderRadius.circular(12),
-                            border: msg.type == 'error' 
-                                ? Border.all(color: Colors.red.shade200)
-                                : null,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                msg.content,
-                                style: TextStyle(
-                                  color: msg.type == 'error' 
-                                      ? Colors.red.shade700
-                                      : Colors.black87,
-                                  fontSize: 14,
-                                ),
-                              ),
-                              if (msg.type == 'recommendation' || msg.type == 'order_query')
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    msg.type.replaceAll('_', ' ').toUpperCase(),
-                                    style: TextStyle(
-                                      color: Colors.grey.shade600,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
+                    if (msg.type == 'book_recommendation') {
+                      try {
+                        final bookData = json.decode(msg.content) as Map<String, dynamic>;
+                        final book = BookDetails.fromJson(bookData);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: buildBookCardWidget(book),
+                        );
+                      } catch (e) {
+                        debugLog('Error rendering book card: $e');
+                        return const Text('Error displaying book details.');
+                      }
+                    }
+                    return Align(
+                      alignment: msg.sender == 'user'
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        padding: const EdgeInsets.all(12),
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: msg.sender == 'user'
+                              ? Colors.blue.shade100
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          msg.content,
+                          style: const TextStyle(fontSize: 14),
                         ),
                       ),
                     );
                   },
                 ),
-              ),      
+              ),
+              // Cart summary if items in cart
+              if (cartItems.isNotEmpty && !showOrderForm) buildCartSummaryWidget(),
+              // Order form if showing
+              if (showOrderForm) buildOrderFormWidget(),
               // Input area
               Container(
                 padding: const EdgeInsets.all(8.0),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
-                  boxShadow: [
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+                  boxShadow: const [
                     BoxShadow(
                       color: Colors.black12,
                       blurRadius: 4,
@@ -474,7 +268,7 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
                           ),
                           filled: true,
                           fillColor: Colors.grey.shade100,
-                          contentPadding: EdgeInsets.symmetric(
+                          contentPadding: const EdgeInsets.symmetric(
                             horizontal: 16,
                             vertical: 8,
                           ),
@@ -490,13 +284,13 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      decoration: BoxDecoration(
+                      decoration: const BoxDecoration(
                         color: Colors.blue,
                         shape: BoxShape.circle,
                       ),
                       child: IconButton(
                         icon: isLoading
-                            ? SizedBox(
+                            ? const SizedBox(
                                 width: 24,
                                 height: 24,
                                 child: CircularProgressIndicator(
@@ -504,7 +298,7 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : Icon(Icons.send, color: Colors.white),
+                            : const Icon(Icons.send, color: Colors.white),
                         onPressed: isLoading
                             ? null
                             : () {
@@ -527,10 +321,139 @@ Widget buildMessageContent(ChatMessage msg, BuildContext context) {
     );
   }
 
+  void addToCart(BookDetails book) {
+    setState(() {
+      final existingItem = cartItems.firstWhere(
+        (item) => item.id == book.id,
+        orElse: () => CartItem(
+          id: book.id,
+          title: book.title,
+          price: book.price,
+          imageUrl: book.imageUrl,
+        ),
+      );
+
+      if (cartItems.contains(existingItem)) {
+        existingItem.quantity++;
+      } else {
+        cartItems.add(existingItem);
+      }
+
+      addMessage(
+        'Added "${book.title}" to cart. Current quantity: ${existingItem.quantity}',
+        'bot',
+        'cart_update',
+      );
+    });
+  }
+
+  void handleBotResponse(Map<String, dynamic> data) {
+    final type = data['type'];
+    final response = data['response'];
+
+    switch (type) {
+      case 'greeting':
+      case 'clarification':
+      case 'question':
+      case 'order_question':
+      case 'general':
+      case 'order':
+      case 'order_query':
+      case 'error':
+        if (response is String) addMessage(response, 'bot');
+        break;
+
+      case 'recommendation':
+        if (response is Map<String, dynamic> && response['books'] is List) {
+          final books = response['books'] as List<dynamic>;
+          addMessage('Here are some book recommendations for you:', 'bot');
+          for (var bookJson in books) {
+            final book = BookDetails.fromJson(bookJson);
+            setState(() {
+              messages.add(ChatMessage(
+                content: json.encode(book),
+                sender: 'bot',
+                type: 'book_recommendation',
+              ));
+            });
+          }
+        }
+        break;
+
+      case 'order_confirmation':
+        if (response is Map<String, dynamic>) {
+          addMessage(
+            '''Order Confirmation:
+Order ID: ${response['order_id']}
+Total Cost: \$${response['total_cost']}
+Order Date: ${response['order_placed_on']}
+Expected Delivery: ${response['expected_delivery']}
+${response['message']}''',
+            'bot',
+            'order_confirmation',
+          );
+        }
+        break;
+
+      case 'order_info':
+        if (response is Map<String, dynamic>) {
+          final status = response['status'] ?? 'Processing';
+          final deliveryDate = response['expected_delivery'] ?? 'Not available';
+
+          addMessage(
+            '''Order Details:
+Order ID: ${response['order_id']}
+Status: $status
+Expected Delivery: $deliveryDate
+Total Cost: \$${response['total_cost']}''',
+            'bot',
+            'order_info',
+          );
+
+          if (response['items'] is List) {
+            addMessage('Order Items:', 'bot');
+            for (var item in response['items']) {
+              addMessage(
+                '- ${item['title']} (Qty: ${item['quantity']}) - \$${item['price']}',
+                'bot',
+                'order_item',
+              );
+            }
+          }
+        }
+        break;
+
+      case 'system':
+        addMessage(response, 'bot', 'system');
+        break;
+
+      default:
+        if (response is String) {
+          addMessage(response, 'bot');
+        } else {
+          addMessage(
+            "I received your message but I'm not sure how to display the response. Can you try rephrasing your request?",
+            'bot',
+          );
+        }
+    }
+
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   @override
   void dispose() {
     _inputController.dispose();
     _scrollController.dispose();
+    OrderFormControllers.dispose();
     super.dispose();
   }
 }

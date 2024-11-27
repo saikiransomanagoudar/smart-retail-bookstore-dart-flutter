@@ -2,11 +2,12 @@ from typing import Dict, Any
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, END
 import asyncio
+import json
 
-from .user_proxy_agent import UserProxyAgent
 from .operator_agent import OperatorAgent
 from .order_agent import OrderAgent
 from .order_query_agent import OrderQueryAgent
+from .fraud_agent import FraudAgent
 # from .fraud_agent import FraudAgent
 
 class MultiAgentSystem:
@@ -18,11 +19,10 @@ class MultiAgentSystem:
     """
     def __init__(self):
         # Initialize agents
-        self.user_proxy = UserProxyAgent()
         self.operator = OperatorAgent()
         self.order_agent = OrderAgent()
         self.tracking_agent = OrderQueryAgent()
-        # self.fraud_agent = FraudAgent()
+        self.fraud_agent = FraudAgent()
         
         # Setup workflow
         self.setup_graph()

@@ -1,149 +1,253 @@
-from typing import Dict, Any
-from langchain_core.messages import HumanMessage, AIMessage
+from typing import Dict, Any, TypedDict, Annotated, Sequence
+from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from langchain.memory import ConversationBufferMemory
 import logging
 import json
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.graph import StateGraph, Graph, START
+from langgraph.prebuilt import ToolExecutor
+
+# Import your agents
+from backend.app.services.agents.operator_agent import OperatorAgent, OperatorResponse
+from backend.app.services.agents.recommendation_agent import RecommendationAgent
+from backend.app.services.agents.order_agent import OrderAgent
+from backend.app.services.agents.order_query_agent import OrderQueryAgent
+from backend.app.services.agents.fraud_agent import FraudAgent
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(), 
+        logging.FileHandler('chatbot.log') 
+    ]
+)
+logger = logging.getLogger('ChatbotService')
+
+# Define state schema
+class ChatState(TypedDict):
+    messages: Sequence[BaseMessage]
+    current_agent: str
+    metadata: Dict[str, Any] 
+    next_step: str
+    final_response: Dict[str, Any]
 
 class ChatbotService:
     def __init__(self):
-        self.llm = ChatOpenAI(temperature=0.7, model="gpt-4o-mini")
-        self.memory = ConversationBufferMemory(return_messages=True)
+        logger.info("Initializing ChatbotService")
         self.first_interaction = True
         self.greeting_message = "Welcome! I'm BookWorm your personal book assistant. How can I help you today?"
-        self.setup_prompts()
 
-    def setup_prompts(self):
-        self.chat_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are BookWorm, a personal book assistant. You help customers with:
-            1. Placing new orders
-            2. Checking order status
-            3. Book recommendations
-            4. General inquiries about books
+        # Initialize agents
+        self.operator = OperatorAgent()
+        self.recommendation_agent = RecommendationAgent()
+        self.order_agent = OrderAgent()
+        self.order_query_agent = OrderQueryAgent()
+        self.fraud_agent = FraudAgent()
+        
+        # Create workflow graph
+        self.workflow = self._create_workflow()
+        logger.info("ChatbotService initialization complete")
 
-            When discussing orders:
-            - For new orders: Ask about book preferences and guide through ordering process
-            - For order status: Ask for order ID or help find their order
-            - For order history: Guide them to view their past orders
+    def _create_workflow(self) -> Graph:
+        logger.info("Creating workflow graph")
+        workflow = StateGraph(ChatState)
 
-            Keep responses friendly, clear, and focused on books and orders."""),
-            ("human", "{input}")
-        ])
+        # Define nodes
+        workflow.add_node("route_intent", self._route_intent_step)
+        workflow.add_node("recommendation", self._recommendation_step)
+        workflow.add_node("order", self._order_step)
+        workflow.add_node("order_query", self._order_query_step)
+        workflow.add_node("fraud", self._fraud_step)
+        workflow.add_node("format_response", self._format_response_step)
 
-    async def chat(self, user_input: dict):
+        # Define edges
+        workflow.add_edge(START, "route_intent")
+        
+        # Add conditional routing based on operator decision
+        workflow.add_conditional_edges(
+            "route_intent",
+            self._get_next_step,
+            {
+                "recommendation": "recommendation",
+                "order": "order",
+                "order_query": "order_query",
+                "fraud": "fraud",
+                "end": "format_response"
+            }
+        )
+
+        # All agent nodes route to format_response
+        workflow.add_edge("recommendation", "format_response")
+        workflow.add_edge("order", "format_response")
+        workflow.add_edge("order_query", "format_response")
+        workflow.add_edge("fraud", "format_response")
+
+        logger.info("Workflow graph creation complete")
+        return workflow.compile()
+
+    def _get_next_step(self, state: ChatState) -> str:
+        """Determine next step based on routing decision"""
+        logger.info("=== Get Next Step ===")
+        
+        routing = state["metadata"].get("routing", "FINISH")
+        logger.info(f"Current routing value: {routing}")
+        
+        next_step = "end"
+        
+        if routing == "RecommendationAgent":
+            logger.info("Routing to recommendation step")
+            next_step = "recommendation"
+        elif routing == "OrderAgent":
+            logger.info("Routing to order step")
+            next_step = "order"
+        elif routing == "OrderQueryAgent":
+            logger.info("Routing to order query step")
+            next_step = "order_query"
+        elif routing == "FraudAgent":
+            logger.info("Routing to fraud step")
+            next_step = "fraud"
+        
+        logger.info(f"Determined next step: {next_step}")
+        return next_step
+
+    async def _route_intent_step(self, state: ChatState) -> ChatState:
+        """Route intent through OperatorAgent"""
         try:
-            logging.info(f"Received user input: {user_input}")
+            logging.info("=== Starting Route Intent Step ===")
+            logging.info(f"Initial state: {json.dumps(state, default=str)}")
             
+            # Send message directly to operator agent
+            routing_decision = await self.operator.analyze_intent(state)
+            logging.info(f"Routing decision: {routing_decision}")
+            
+            state["metadata"]["routing"] = routing_decision.routing
+            state["metadata"]["intent"] = routing_decision.intent
+            state["metadata"]["confidence"] = routing_decision.confidence
+            state["current_agent"] = "operator"
+            
+            logging.info(f"Final route state: {json.dumps(state, default=str)}")
+            return state
+        except Exception as e:
+            logging.error(f"Error in routing: {str(e)}", exc_info=True)
+            raise
+
+    async def _recommendation_step(self, state: ChatState) -> ChatState:
+        """Process recommendation request"""
+        logger.info("Starting recommendation step")
+        try:
+            response = await self.recommendation_agent.process(state)
+            logger.debug(f"Recommendation response: {response}")
+            
+            state["final_response"] = response
+            state["current_agent"] = "recommendation"
+            
+            logger.info("Recommendation step completed")
+            return state
+        except Exception as e:
+            logger.error(f"Error in recommendation: {str(e)}", exc_info=True)
+            raise
+
+    async def _order_step(self, state: ChatState) -> ChatState:
+        """Process order request"""
+        logger.info("Starting order step")
+        try:
+            response = await self.order_agent.process(state)
+            logger.debug(f"Order response: {response}")
+            
+            state["final_response"] = response
+            state["current_agent"] = "order"
+            
+            logger.info("Order step completed")
+            return state
+        except Exception as e:
+            logger.error(f"Error in order: {str(e)}", exc_info=True)
+            raise
+
+    async def _order_query_step(self, state: ChatState) -> ChatState:
+        """Process order query request"""
+        logger.info("Starting order query step")
+        try:
+            response = await self.order_query_agent.process(state)
+            logger.debug(f"Order query response: {response}")
+            
+            state["final_response"] = response
+            state["current_agent"] = "order_query"
+            
+            logger.info("Order query step completed")
+            return state
+        except Exception as e:
+            logger.error(f"Error in order query: {str(e)}", exc_info=True)
+            raise
+
+    async def _fraud_step(self, state: ChatState) -> ChatState:
+        """Process fraud detection request"""
+        logger.info("Starting fraud detection step")
+        try:
+            response = await self.fraud_agent.process(state)
+            logger.debug(f"Fraud detection response: {response}")
+            
+            state["final_response"] = response
+            state["current_agent"] = "fraud"
+            
+            logger.info("Fraud detection step completed")
+            return state
+        except Exception as e:
+            logger.error(f"Error in fraud detection: {str(e)}", exc_info=True)
+            raise
+
+    async def _format_response_step(self, state: ChatState) -> ChatState:
+        """Format the final response"""
+        logger.info("=== Format Response Step ===")
+        logger.info("Starting response formatting step")
+        try:
+            logger.info(f"Input state to format: {state}")
+            if "final_response" not in state:
+                logger.warning("No final response found in state")
+                state["final_response"] = {
+                    "type": "error",
+                    "response": "No response generated"
+                }
+            
+            logger.debug(f"Formatted response: {state['final_response']}")
+            logger.info("Response formatting complete")
+            return state
+        except Exception as e:
+            logger.error(f"Error formatting response: {str(e)}", exc_info=True)
+            raise
+
+    async def chat(self, user_input: dict) -> Dict[str, Any]:
+        """Process chat input through the workflow"""
+        logger.info("Starting new chat interaction")
+        try:
             # Handle first interaction
             if self.first_interaction and isinstance(user_input, str):
                 self.first_interaction = False
                 return {"type": "greeting", "response": self.greeting_message}
 
-            # Process message content
-            if isinstance(user_input, dict):
-                message = user_input.get('message', '')
-            else:
-                message = user_input
+            # Create message from input
+            message = user_input.get('message', '') if isinstance(user_input, dict) else user_input
 
-            # Clear conversation if requested
-            if isinstance(message, str) and message.lower() == "clear":
-                self.reset_state()
-                return {"type": "system", "response": "How can I help you with books today?"}
+            # Initialize state with raw message
+            state = ChatState(
+                messages=[HumanMessage(content=message)],  # Just pass the raw message
+                current_agent="",
+                metadata={},
+                next_step="",
+                final_response={}
+            )
 
-            # Handle basic greetings
-            if isinstance(message, str) and message.lower() in ["hi", "hello"]:
-                self.first_interaction = False
-                return {
-                    "type": "greeting",
-                    "response": self.greeting_message
-                }
-
-            try:
-                # Determine intent and response type
-                response_type = "general"
-                if isinstance(message, str):
-                    message_lower = message.lower()
-                    if "new order" in message_lower or "place order" in message_lower:
-                        response_type = "order"
-                        chain = ChatPromptTemplate.from_messages([
-                            ("system", "You are helping a customer place a new order. Guide them through the process and ask for necessary details."),
-                            ("human", "{input}")
-                        ]) | self.llm
-                    elif "order" in message_lower and any(word in message_lower for word in ["status", "track", "find", "history"]):
-                        response_type = "order_query"
-                        chain = ChatPromptTemplate.from_messages([
-                            ("system", "You are helping a customer find order information. Ask for order ID if needed."),
-                            ("human", "{input}")
-                        ]) | self.llm
-                    else:
-                        chain = self.chat_prompt | self.llm
-
-                # Get response from LLM
-                response = await chain.ainvoke({"input": message})
-                
-                # Extract response content
-                response_content = response.content if isinstance(response, AIMessage) else str(response)
-                logging.info(f"LLM Response: {response_content}")
-
-                # Store conversation in memory
-                self.memory.chat_memory.add_user_message(message)
-                self.memory.chat_memory.add_ai_message(response_content)
-
-                return {
-                    "type": response_type,
-                    "response": response_content
-                }
-
-            except Exception as e:
-                logging.error(f"Error getting LLM response: {str(e)}")
-                return {
-                    "type": "error",
-                    "response": "I'm having trouble understanding that. Could you please rephrase your request?"
-                }
+            # Run workflow
+            final_state = await self.workflow.ainvoke(state)
+            return final_state["final_response"]
 
         except Exception as e:
-            logging.error(f"Error in chat processing: {str(e)}")
+            logger.error(f"Error in chat processing: {str(e)}")
             return {
                 "type": "error",
-                "response": "I encountered an error processing your request. Please try again."
-            }
-
-    def reset_state(self):
-        """Reset the conversation state"""
-        self.first_interaction = True
-        self.memory.clear()
-
-    async def process_order_request(self, user_input: str, user_id: str) -> Dict[str, Any]:
-        """Process order-related requests"""
-        try:
-            # Create order-specific prompt
-            order_prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are BookWorm, handling order-related requests. 
-                For new orders: Guide the customer through order placement.
-                For order status: Ask for order ID or help locate their order.
-                For order history: Help them view their past orders."""),
-                ("human", "User ID: {user_id}\nRequest: {input}")
-            ])
-
-            chain = order_prompt | self.llm
-            response = await chain.ainvoke({
-                "input": user_input,
-                "user_id": user_id
-            })
-
-            # Extract response content
-            response_content = response.content if isinstance(response, AIMessage) else str(response)
-            
-            return {
-                "type": "order_query",
-                "response": response_content
-            }
-        except Exception as e:
-            logging.error(f"Error processing order request: {str(e)}")
-            return {
-                "type": "error",
-                "response": "I'm having trouble with your order request. Could you please try again?"
+                "response": "I encountered an error processing your request."
             }
 
 chatbot_service = ChatbotService()
