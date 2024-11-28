@@ -2,11 +2,13 @@ class ChatMessage {
   final String content;
   final String sender;
   final String type;
+  final String? imageData;
 
   ChatMessage({
     required this.content,
     required this.sender,
     this.type = 'text',
+    this.imageData,
   });
 
   Map<String, dynamic> toJson() => {

@@ -41,12 +41,14 @@ class ChatbotService:
         logger.info("Initializing ChatbotService")
         self.first_interaction = True
         self.greeting_message = "Welcome! I'm BookWorm your personal book assistant. How can I help you today?"
+        
+        # Add conversation state tracking
+        self.active_sessions = {}  # Store active conversation contexts
 
         # Initialize agents
         self.operator = OperatorAgent()
         self.recommendation_agent = RecommendationAgent()
         self.order_agent = OrderAgent()
-        # self.order_query_agent = OrderQueryAgent()
         self.fraud_agent = FraudAgent()
         
         # Create workflow graph
@@ -119,9 +121,12 @@ class ChatbotService:
         """Route intent through OperatorAgent"""
         try:
             logging.info("=== Starting Route Intent Step ===")
-            logging.info(f"Initial state: {json.dumps(state, default=str)}")
-            
-            # Send message directly to operator agent
+
+            if state['metadata'].get('current_agent') == 'fraud':
+                state['metadata']['routing'] = 'FraudAgent'
+                return state
+
+            # Otherwise, get routing from operator
             routing_decision = await self.operator.analyze_intent(state)
             logging.info(f"Routing decision: {routing_decision}")
             
@@ -130,7 +135,6 @@ class ChatbotService:
             state["metadata"]["confidence"] = routing_decision.confidence
             state["current_agent"] = "operator"
             
-            logging.info(f"Final route state: {json.dumps(state, default=str)}")
             return state
         except Exception as e:
             logging.error(f"Error in routing: {str(e)}", exc_info=True)
@@ -270,28 +274,55 @@ class ChatbotService:
         """Process chat input through the workflow"""
         logger.info("Starting new chat interaction")
         try:
+            # Extract user ID for session management
+            user_id = user_input.get('metadata', {}).get('user_id')
+            
             # Handle first interaction
             if self.first_interaction and isinstance(user_input, str):
                 self.first_interaction = False
                 return {"type": "greeting", "response": self.greeting_message}
 
+            # Get or create session state
+            session = self.active_sessions.get(user_id, {
+                'current_agent': None,
+                'conversation_state': None,
+                'messages': []
+            })
+
             # Extract message and metadata
             message = user_input.get('message', '') if isinstance(user_input, dict) else user_input
-            metadata = user_input.get('metadata', {}) if isinstance(user_input, dict) else {}
+            metadata = user_input.get('metadata', {})
 
-            logger.info(f"User ID from request: {metadata.get('user_id')}")
+            # Update metadata with session context
+            metadata.update({
+                'current_agent': session['current_agent'],
+                'conversation_state': session['conversation_state']
+            })
 
             # Initialize state with message and metadata
             state = ChatState(
-                messages=[HumanMessage(content=message)],
-                current_agent="",
-                metadata=metadata,  # This will include user_id
+                messages=[*session['messages'], HumanMessage(content=message)],
+                current_agent=session['current_agent'] or "",
+                metadata=metadata,
                 next_step="",
                 final_response={}
             )
 
-            # Run workflow
-            final_state = await self.workflow.ainvoke(state)
+            # If we're in the middle of a fraud flow, bypass operator
+            if session['current_agent'] == 'fraud':
+                state['metadata']['routing'] = 'FraudAgent'
+                final_state = await self.workflow.ainvoke(state)
+            else:
+                # Run normal workflow
+                final_state = await self.workflow.ainvoke(state)
+
+            # Update session state
+            self.active_sessions[user_id] = {
+                'current_agent': final_state['current_agent'],
+                'conversation_state': final_state['metadata'].get('conversation_state'),
+                'messages': [*session['messages'], HumanMessage(content=message)]
+            }
+
             return final_state["final_response"]
 
         except Exception as e:

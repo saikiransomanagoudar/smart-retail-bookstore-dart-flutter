@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-
 import 'models/message.dart';
 import 'models/book_details.dart';
 import 'models/cart_item.dart';
+import 'package:file_picker/file_picker.dart';
 
 import 'widgets/cart_summary.dart';
 import 'widgets/order_form.dart';
@@ -29,6 +29,7 @@ class _ChatbotState extends State<Chatbot> {
   List<ChatMessage> messages = [];
   final TextEditingController _inputController = TextEditingController();
   bool isLoading = false;
+  String? _selectedImage;
 
   List<CartItem> cartItems = [];
   bool showOrderForm = false;
@@ -91,6 +92,34 @@ class _ChatbotState extends State<Chatbot> {
     );
   }
 
+  Future<void> _pickImage() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+
+      if (result != null) {
+        final bytes = result.files.first.bytes;
+        if (bytes != null) {
+          setState(() {
+            _selectedImage = base64Encode(bytes);
+            // Add image preview message
+            messages.add(ChatMessage(
+              content: 'Selected image for analysis',
+              sender: 'user',
+              type: 'image',
+              imageData: _selectedImage,
+            ));
+          });
+          _scrollToBottom();
+        }
+      }
+    } catch (e) {
+      debugLog('Error picking image: $e');
+    }
+  }
+
   Future<void> sendMessage(String message) async {
     setState(() {
       isLoading = true;
@@ -102,22 +131,40 @@ class _ChatbotState extends State<Chatbot> {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final userId = authProvider.userId;
 
+      // Create a properly structured message
+      final messageContent = {
+        "type": _selectedImage != null ? "image" : "text",
+        "content": message,
+        "metadata": {
+          "image": _selectedImage,
+          "timestamp": DateTime.now().toIso8601String(),
+        }
+      };
+
       final messageHistory = messages.map((msg) => {
         'content': msg.content,
         'type': msg.type,
         'sender': msg.sender,
       }).toList();
 
+      // Create the request body
+      final requestBody = {
+        'message': json.encode(messageContent),
+        'messages': messageHistory,
+        'metadata': {
+          'user_id': userId,
+          'image': _selectedImage,
+        },
+        'type': _selectedImage != null ? 'image' : 'text',
+        'original_message': message,
+      };
+
+      debugLog('Sending request body: ${json.encode(requestBody)}');
+
       final response = await http.post(
         Uri.parse('http://localhost:8000/api/chatbot/chat'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'message': message,
-          'messages': messageHistory,
-          'metadata': {
-            'user_id': userId,
-          }
-        }),
+        body: json.encode(requestBody),
       );
 
       debugLog('Response status code: ${response.statusCode}');
@@ -127,6 +174,10 @@ class _ChatbotState extends State<Chatbot> {
         final data = json.decode(response.body);
         debugLog('Decoded data: $data');
         handleBotResponse(data);
+        // Clear the selected image after sending
+        setState(() {
+          _selectedImage = null;
+        });
       }
     } catch (e) {
       debugLog('Error communicating with chatbot: $e');
@@ -198,7 +249,28 @@ class _ChatbotState extends State<Chatbot> {
       }
       break;
 
+    case 'damage_assessment':
+      if (response is Map<String, dynamic> && response.containsKey('message')) {
+        addMessage(response['message'], 'bot', 'damage_assessment');
+      }
+      break;
+
+    case 'question':
+      if (response is Map<String, dynamic> && response.containsKey('message')) {
+        addMessage(response['message'], 'bot', type);
+      } else if (response is String) {
+        addMessage(response, 'bot', type);
+      }
+      break;
+
     case 'clarification':
+      if (response is Map<String, dynamic> && response.containsKey('message')) {
+        addMessage(response['message'], 'bot', type);
+      } else if (response is String) {
+        addMessage(response, 'bot', type);
+      }
+      break;
+
     case 'error':
       if (response is Map<String, dynamic> && response['message'] != null) {
         addMessage(cleanText(response['message']), 'bot', type);
@@ -273,6 +345,8 @@ ${response['message']}''');
       debugLog('Unhandled response type: $type');
       if (response is String) {
         addMessage(cleanText(response), 'bot', 'text');
+      } else if (response is Map<String, dynamic> && response.containsKey('message')) {
+        addMessage(response['message'], 'bot', 'text');
       } else {
         addMessage(
           cleanText(
@@ -315,6 +389,89 @@ ${response['message']}''');
       }
     }
 
+    if (msg.type == 'image' && msg.imageData != null) {
+      return Align(
+        alignment: msg.sender == 'user' ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: msg.sender == 'user' ? Colors.blue.shade100 : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(msg.content),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  base64Decode(msg.imageData!),
+                  height: 150,
+                  width: 200,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Handle bot messages
+    if (msg.sender == 'bot') {
+      String displayText = '';
+      
+      try {
+        Map<String, dynamic> contentMap;
+        
+        // Parse content if it's a string
+        if (msg.content is String) {
+          contentMap = json.decode(msg.content as String);
+        } else if (msg.content is Map) {
+          contentMap = Map<String, dynamic>.from(msg.content as Map);
+        } else {
+          throw FormatException('Invalid message content format');
+        }
+
+        // Extract message from response
+        if (contentMap.containsKey('response')) {
+          final responseData = contentMap['response'];
+          if (responseData is Map<String, dynamic> && responseData.containsKey('message')) {
+            displayText = responseData['message'].toString();
+          } else if (responseData is String) {
+            displayText = responseData;
+          }
+        } else {
+          displayText = contentMap.toString();
+        }
+      } catch (e) {
+        debugPrint('Error parsing message content: $e');
+        displayText = msg.content.toString();
+      }
+
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(12),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.7,
+          ),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            displayText,
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+      );
+    }
+
+    // Default user message bubble
     return Align(
       alignment: msg.sender == 'user' ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -458,6 +615,11 @@ ${response['message']}''');
                 ),
                 child: Row(
                   children: [
+                    IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: _pickImage,
+                      tooltip: 'Upload image for fraud/damage analysis',
+                    ),
                     Expanded(
                       child: TextField(
                         controller: _inputController,

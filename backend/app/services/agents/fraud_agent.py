@@ -3,6 +3,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 import json
 import logging
+
+# Configure logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.ERROR)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
 from pydantic import BaseModel
 import base64
 from PIL import Image
@@ -22,7 +29,6 @@ class FraudAgent:
     """Handles fraud claims and damaged shipment reports"""
     
     def __init__(self):
-        # Initialize LLMs with different temperatures for different tasks
         self.damage_llm = ChatOpenAI(temperature=0.3, model="gpt-4-vision-preview")
         self.fraud_llm = ChatOpenAI(temperature=0.2, model="gpt-4o-mini")
         self.setup_prompts()
@@ -75,6 +81,43 @@ class FraudAgent:
             ("human", "{transaction_details}")
         ])
 
+    async def _analyze_damage(self, image_data: str, message: str) -> Dict[str, Any]:
+        """Analyze damage from image and message"""
+        try:
+            # Create analysis prompt with image and message
+            analysis = await self.damage_llm.ainvoke(
+                self.damage_prompt.format_messages(
+                    image_description=message,
+                    context={"image": image_data}
+                )
+            )
+
+            result = json.loads(analysis.content)
+            
+            # Create decision based on analysis
+            decision = {
+                "case_id": f"DMG-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "damage_type": result.get("damage_type", "shipping damage"),
+                "severity": result.get("severity", "medium"),
+                "likely_impact": result.get("likely_impact", "potential product damage"),
+                "recommended_action": result.get("recommended_action", "replace"),
+                "confidence": result.get("confidence", 0.8),
+                "reason": result.get("reason", "Based on visible shipping damage")
+            }
+
+            return decision
+
+        except Exception as e:
+            logger.error(f"Error in damage analysis: {str(e)}")
+            return {
+                "case_id": f"DMG-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "damage_type": "shipping damage",
+                "severity": "under review",
+                "recommended_action": "replace",
+                "confidence": 0.7,
+                "reason": "Default assessment due to analysis error"
+            }
+
     async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """Process fraud or damage claims"""
         try:
@@ -82,21 +125,97 @@ class FraudAgent:
             if not messages:
                 return self._create_error_response("No message found to process")
 
-            message_data = json.loads(messages[-1].content)
-            message_type = message_data.get("type", "")
-            
-            if message_type == "image" and "image" in message_data.get("metadata", {}):
-                # Handle damage assessment with image
-                return await self._handle_damage_claim(message_data)
-            elif "fraud" in message_data.get("original_message", "").lower():
-                # Handle fraud claim with OCR
-                return await self._handle_fraud_claim(message_data)
-            else:
-                return self._create_error_response("Invalid request type")
+            # Extract the latest message
+            try:
+                last_message = messages[-1].content
+                if isinstance(last_message, str) and last_message.startswith('{"type"'):
+                    message_data = json.loads(last_message)
+                    current_message = message_data.get("content", "")
+                    # Check for image in latest message
+                    if message_data.get("metadata", {}).get("image"):
+                        image_data = message_data["metadata"]["image"]
+                    else:
+                        image_data = None
+                else:
+                    current_message = last_message
+                    image_data = None
+            except json.JSONDecodeError:
+                current_message = last_message
+                image_data = None
+
+            # If we have an image, process the damage analysis
+            if image_data:
+                try:
+                    analysis = await self._analyze_damage(image_data, current_message)
+                    return {
+                        "type": "damage_assessment",
+                        "response": {
+                            "message": f"""Thank you for reporting the damaged delivery. Here's my assessment:
+
+    Damage Type: {analysis['damage_type']}
+    Severity: {analysis['severity']}
+    Action: {analysis['recommended_action'].title()}
+
+    Next Steps:
+    1. We'll process a {analysis['recommended_action']} for your order
+    2. You'll receive a confirmation email within 24 hours
+    3. Please keep the damaged packaging for potential review
+
+    Your case reference: {analysis['case_id']}
+
+    Is there anything else you need assistance with?""",
+                            "assessment": analysis
+                        }
+                    }
+                except Exception as e:
+                    logger.error(f"Error analyzing damage: {str(e)}")
+                    return self._create_error_response("Error analyzing damage. Please try again.")
+
+            # Handle fraud report without image
+            if "fraud" in current_message.lower():
+                return {
+                    "type": "clarification",
+                    "response": {
+                        "message": """Could you provide more details about the fraudulent activity? Please include:
+    1. Transaction details
+    2. Date of the incident
+    3. Any relevant documentation or screenshots"""
+                    }
+                }
+
+            # Handle damage report without image
+            if any(word in current_message.lower() for word in ["damage", "damaged", "broken"]):
+                return {
+                    "type": "clarification",
+                    "response": {
+                        "message": """I can help you with your damage report. Please:
+    1. Upload a photo of the damaged item/packaging
+    2. Provide the date you received the delivery
+    3. Mention if the damage is to the packaging, product, or both"""
+                    }
+                }
+
+            # Default response
+            return {
+                "type": "clarification",
+                "response": {
+                    "message": "Could you please provide more details about your issue? Are you reporting fraud or product damage?"
+                }
+            }
 
         except Exception as e:
-            logging.error(f"Error in fraud/damage processing: {str(e)}")
+            logger.error(f"Error in fraud processing: {str(e)}")
             return self._create_error_response(str(e))
+
+    def _create_error_response(self, error: str) -> Dict[str, Any]:
+        """Create formatted error response"""
+        return {
+            "type": "error",
+            "response": {
+                "message": "I apologize, but I'm having trouble processing your request. Could you please provide more details about the fraud or damage you're reporting?",
+                "error": str(error)
+            }
+        }
 
     async def _handle_damage_claim(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process damaged shipment claims"""
@@ -151,17 +270,19 @@ class FraudAgent:
     async def _handle_fraud_claim(self, message_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process fraudulent transaction claims"""
         try:
-            # Extract OCR image if present
+            # Extract OCR text from image if present
             image_data = message_data.get("metadata", {}).get("image", "")
-            original_message = message_data.get("original_message", "")
-
-            # Perform OCR if image is present
-            transaction_details = ""
-            if image_data:
-                transaction_details = self._perform_ocr(image_data)
+            conversation_history = message_data.get("metadata", {}).get("conversation_history", [])
             
-            # Combine OCR results with user message
-            analysis_text = f"{original_message}\n\nTransaction Details:\n{transaction_details}"
+            # Perform OCR if image is present
+            ocr_text = self._perform_ocr(image_data) if image_data else ""
+            
+            # Combine all available information for analysis
+            analysis_text = f"""
+            User Report: {message_data.get('content', '')}
+            Conversation History: {json.dumps(conversation_history)}
+            Transaction Details (OCR): {ocr_text}
+            """
 
             # Analyze with fraud detection LLM
             analysis = await self.fraud_llm.ainvoke(
@@ -170,11 +291,8 @@ class FraudAgent:
                 )
             )
 
-            try:
-                result = json.loads(analysis.content)
-            except json.JSONDecodeError:
-                return self._create_error_response("Error parsing fraud analysis")
-
+            result = json.loads(analysis.content)
+            
             # Create decision based on analysis
             decision = FraudDecision(
                 decision="refund" if result["recommended_action"] == "refund"
