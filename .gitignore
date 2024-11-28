@@ -3,6 +3,7 @@
 .dart_tool/
 build/.env.local
 backend/.env
+backend/app/core/config.py
 # Flutter
 build/
 .dart_tool/

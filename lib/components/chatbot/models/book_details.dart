@@ -24,9 +24,8 @@ class BookDetails {
   });
 
   factory BookDetails.fromJson(Map<String, dynamic> json) {
-    print('Parsing BookDetails from JSON: $json'); // Keep this debug line
-    
-    // Extract year from publishedDate if available
+    print('Parsing BookDetails from JSON: $json');
+
     String releaseYear = 'N/A';
     if (json['publishedDate'] != null) {
       try {
@@ -41,12 +40,12 @@ class BookDetails {
       id: json['id']?.toString() ?? '',
       title: json['title'] ?? 'Unknown Title',
       releaseYear: releaseYear,
-      releaseDate: json['publishedDate'] ?? 'N/A', // Changed from release_date
-      imageUrl: json['coverImage'] ?? 'https://via.placeholder.com/150', // Changed from image_url
-      rating: double.tryParse(json['averageRating']?.toString() ?? '0') ?? 0, // Changed from rating
-      pages: int.tryParse(json['pageCount']?.toString() ?? '0') ?? 0, // Changed from pages
+      releaseDate: json['publishedDate'] ?? 'N/A',
+      imageUrl: json['coverImage'] ?? 'https://via.placeholder.com/150',
+      rating: json['rating'] != null ? double.tryParse(json['rating'].toString()) ?? 0.0 : 0.0,
+      pages: json['pages'] != null ? int.tryParse(json['pages'].toString()) ?? 0 : 0,
       author: json['author'] ?? 'Unknown Author',
-      price: 9.99, // Set default price since it's not in the API response
+      price: json['price'] != null ? double.tryParse(json['price'].toString()) ?? 0.0 : 0.0,
       reasonForRecommendation: json['ReasonForRecommendation'] ?? 'No recommendation reason provided.',
     );
   }

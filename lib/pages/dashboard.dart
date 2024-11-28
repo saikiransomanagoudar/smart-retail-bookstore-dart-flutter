@@ -105,11 +105,10 @@ Widget buildFlipCardFront(dynamic book) {
         borderRadius: BorderRadius.circular(8),
         child: Stack(
           children: [
-            // Debug: Add a red border around the image
             Positioned.fill(
               child: Container(
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.red, width: 2), // Debug border
+                  border: Border.all(color: Colors.red, width: 2),
                 ),
               ),
             ),
@@ -335,6 +334,7 @@ Widget buildFlipCardFront(dynamic book) {
               style: TextStyle(
                 color: Colors.grey[600],
                 fontSize: 14,
+                overflow: TextOverflow.ellipsis,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
