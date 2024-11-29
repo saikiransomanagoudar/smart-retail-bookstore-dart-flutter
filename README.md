@@ -2,6 +2,10 @@
 
 A modern bookstore application built with Flutter, FastAPI, and AI-powered recommendations.
 
+## Architecture
+![architecture](https://github.com/user-attachments/assets/92840ea2-3827-41eb-b65e-4f9c939ac47d)
+
+
 ## Technology Stack 🛠️
 
 ### Backend
