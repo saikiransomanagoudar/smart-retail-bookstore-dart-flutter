@@ -18,7 +18,6 @@ A modern bookstore application built with Flutter, FastAPI, and AI-powered recom
 
 ### Frontend
 - **Framework:** Flutter/Dart
-- **Styling:** TailwindCSS
 
 ### External APIs
 - Hardcover GraphQL API for book metadata
